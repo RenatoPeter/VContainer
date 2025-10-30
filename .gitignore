@@ -1,0 +1,3 @@
+# Project exclude paths
+/vContainer-api/target/
+/vContainer-core/target/
