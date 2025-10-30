@@ -1,0 +1,12 @@
+name: VContainer
+version: '1.0'
+main: hu.vzone.vContainer.VContainer
+api-version: '1.21'
+author: MrVIRO
+commands:
+  container:
+    description: Open your container
+    usage: /container
+  vcontainer:
+    description: Admin container command
+    usage: /vcontainer <open|clear> <player>

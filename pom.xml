@@ -1,0 +1,12 @@
+<project>
+    <modelVersion>4.0.0</modelVersion>
+    <groupId>hu.vzone</groupId>
+    <artifactId>vContainer</artifactId>
+    <version>1.0.0</version>
+    <packaging>pom</packaging>
+
+    <modules>
+        <module>vContainer-api</module>
+        <module>vContainer-core</module>
+    </modules>
+</project>

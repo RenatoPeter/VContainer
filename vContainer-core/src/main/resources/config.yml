@@ -1,0 +1,32 @@
+# VContainer config
+# title supports placeholders: %current-page% and %max-page%
+title: "§0Container %current-page%/%max-page%"
+
+
+# Content slots (list of slot indices where items will be shown). If omitted will use default 0-44.
+content-slots: []
+
+
+# Control buttons config
+buttons:
+  prev:
+    material: ARROW
+    name: "§a« Prev"
+    lore:
+      - "§7Previous Page"
+    slot: 45+3 # Indicates last row index + 3 in our implementation (logical)
+  next:
+    material: ARROW
+    name: "§aNext »"
+    lore:
+      - "§7Next Page"
+    slot: 45+5
+
+#If 2 or more same items are entered, stack them together. True = Yes, stack them together False = No, enter them separately
+stack: true
+
+# Maximum stack size (applies when stacking is enabled)
+max-stack: 64
+
+# Player data folder is player_data by default
+player-data-folder: player_data
