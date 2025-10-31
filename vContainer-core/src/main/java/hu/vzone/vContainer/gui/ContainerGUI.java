@@ -1,5 +1,6 @@
 package hu.vzone.vContainer.gui;
 
+import hu.vzone.vContainer.VContainer;
 import hu.vzone.vContainer.managers.ContainerManager;
 import hu.vzone.vContainer.utils.Buttons;
 import hu.vzone.vContainer.utils.InventoryFill;
@@ -40,7 +41,7 @@ public class ContainerGUI {
 
         String title = Bukkit.getPluginManager().getPlugin("VContainer").getConfig().getString("title", "§0Container %current-page%/%max-page%");
         title = title.replace("%current-page%", String.valueOf(page)).replace("%max-page%", String.valueOf(maxPage));
-        Inventory inv = Bukkit.createInventory(null, SLOTS, ChatColor.translateAlternateColorCodes('§', title));
+        Inventory inv = Bukkit.createInventory(null, SLOTS, VContainer.formatMessage(title));
 
 
 // Place content

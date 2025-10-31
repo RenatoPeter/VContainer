@@ -23,10 +23,15 @@ public class Buttons {
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(section.getString("name", "§cUnnamed"));
-            List<String> lore = section.getStringList("lore");
-            if (lore == null) lore = new ArrayList<>();
-            meta.setLore(lore);
+            meta.setDisplayName(VContainer.formatMessage(section.getString("name", "§cUnnamed")));
+            List<String> loreRaw = section.getStringList("lore");
+            List<String> loreFormated = new ArrayList<>();
+            if (loreRaw == null) {
+                for(String l : loreRaw){
+                    loreFormated.add(VContainer.formatMessage(l));
+                }
+            }
+            meta.setLore(loreFormated);
             meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
             item.setItemMeta(meta);
         }
