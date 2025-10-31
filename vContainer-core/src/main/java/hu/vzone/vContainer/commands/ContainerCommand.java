@@ -21,11 +21,14 @@ public class ContainerCommand implements CommandExecutor {
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!(sender instanceof Player)) {
+        if (!(sender instanceof Player player)) {
             sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.only-players-can-use", "{prefix} Only players can use this command!")));
             return true;
         }
-        Player player = (Player) sender;
+        if(!player.hasPermission("vcontainer.use")){
+            sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.no-permission", "{prefix} You don't have any permission!")));
+            return true;
+        }
         ContainerGUI.openContainer(player, manager, 1);
         return true;
     }

@@ -6,9 +6,10 @@ container:
 
 command:
   only-players-can-use: "{prefix} Only players can use this command!"
+  no-permission: "{prefix} You don't have any permission!" #vcontainer.use
 
 admin-command:
-  no-permission: "{prefix} You don't have any permission!"
+  no-permission: "{prefix} You don't have any permission!" #vcontainer.admin
   usage:
     - "&8&m<---======[&r &#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8&m]======--->"
     - "&f/vcontainer open <player> &8- &7Open a specific player container"
@@ -23,5 +24,5 @@ admin-command:
   need-a-player: "{prefix} Please enter a player!"
   unknown-source: "{prefix} Unknown source: {source}"
   item-not-found: "{prefix} The specified item was not found. &8(&7{item}&8)"
-  add-to-container: "{prefix} {amount} of {item} items added to {player}'s container."
+  add-to-container: "{prefix} {amount} of {item} items added to {player}'s container." #Permission: vcontainer.notify
   unknown-action: "{prefix} Unknown action: {action}"
