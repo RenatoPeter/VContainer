@@ -2,10 +2,10 @@ package hu.vzone.vContainer.listeners;
 
 import hu.vzone.vContainer.VContainer;
 import hu.vzone.vContainer.gui.ContainerGUI;
+import hu.vzone.vContainer.utils.ContainerHolder;
 import hu.vzone.vContainer.managers.ContainerManager;
 import hu.vzone.vContainer.utils.ItemUtils;
 import hu.vzone.vContainer.utils.PlayerViewingCache;
-import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -15,6 +15,7 @@ import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
 public class ContainerListener implements Listener {
+
     private final ContainerManager manager;
     private final VContainer plugin;
 
@@ -27,11 +28,9 @@ public class ContainerListener implements Listener {
     public void onClick(InventoryClickEvent e) {
         if (!(e.getWhoClicked() instanceof Player)) return;
         Player p = (Player) e.getWhoClicked();
-        if (p.getOpenInventory() == null) return;
 
-        String title = p.getOpenInventory().getTitle();
-        if (title == null) return;
-        if (!ChatColor.stripColor(title).toLowerCase().contains("container")) return;
+        Inventory topInv = e.getView().getTopInventory();
+        if (!(topInv.getHolder() instanceof ContainerHolder)) return; // ✅ csak a VContainer GUI-ra reagál
 
         e.setCancelled(true);
 
@@ -43,7 +42,7 @@ public class ContainerListener implements Listener {
         int max = (info != null ? info.max : 1);
 
         int slot = e.getRawSlot();
-        int rows = p.getOpenInventory().getTopInventory().getSize() / 9;
+        int rows = topInv.getSize() / 9;
         int controlRowStart = (rows - 1) * 9;
 
         // --- Oldalváltás ---
@@ -69,7 +68,7 @@ public class ContainerListener implements Listener {
                 ItemStack current = inv.getItem(i);
                 if (current == null) continue;
                 if (ItemUtils.isSameItemWithNBT(current, toTake)) {
-                    int maxStack = Math.min(current.getMaxStackSize(), 64); // vagy configból
+                    int maxStack = Math.min(current.getMaxStackSize(), 64);
                     int space = maxStack - current.getAmount();
                     if (space > 0) {
                         int add = Math.min(space, remaining);
@@ -92,7 +91,6 @@ public class ContainerListener implements Listener {
             // Amit sikerült odaadni
             int given = amountToGive - remaining;
             if (given > 0) {
-                // Csökkentsük a containerben az item mennyiségét
                 ItemStack newContainerItem = toTake.clone();
                 if (remaining > 0) {
                     newContainerItem.setAmount(remaining);
@@ -102,14 +100,23 @@ public class ContainerListener implements Listener {
                     manager.removeItemFromContainer(p, toTake);
                 }
 
-                String take = plugin.getMessageConfig().getString("container.take", "{prefix} You took {amount} of {item} out of the container.");
+                String take = plugin.getMessageConfig().getString(
+                        "container.take",
+                        "{prefix} You took {amount} of {item} out of the container."
+                );
 
-                p.sendMessage(plugin.formatMessage(take.replace("{amount}", String.valueOf(given)).replace("{item}", (toTake.hasItemMeta() && toTake.getItemMeta().hasDisplayName()
-                        ? toTake.getItemMeta().getDisplayName()
-                        : toTake.getType().name()))));
+                p.sendMessage(plugin.formatMessage(
+                        take.replace("{amount}", String.valueOf(given))
+                                .replace("{item}", (toTake.hasItemMeta() && toTake.getItemMeta().hasDisplayName()
+                                        ? toTake.getItemMeta().getDisplayName()
+                                        : toTake.getType().name()))
+                ));
 
             } else {
-                String inventoryFull = plugin.getMessageConfig().getString("container.inventory-full", "{prefix} Your inventory is full.");
+                String inventoryFull = plugin.getMessageConfig().getString(
+                        "container.inventory-full",
+                        "{prefix} Your inventory is full."
+                );
                 p.sendMessage(plugin.formatMessage(inventoryFull));
             }
 
@@ -122,6 +129,9 @@ public class ContainerListener implements Listener {
     public void onClose(InventoryCloseEvent e) {
         if (!(e.getPlayer() instanceof Player)) return;
         Player p = (Player) e.getPlayer();
+
+        Inventory topInv = e.getView().getTopInventory();
+        if (!(topInv.getHolder() instanceof ContainerHolder)) return; // ✅ csak a container GUI-nál
         PlayerViewingCache.remove(p);
     }
 }

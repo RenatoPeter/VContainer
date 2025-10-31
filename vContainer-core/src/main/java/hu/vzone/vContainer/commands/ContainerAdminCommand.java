@@ -154,7 +154,7 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                 }
 
                 manager.addItemToContainer(receiver, item);
-                sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.item-not-found", "{prefix} {amount} of {item} items added to {player}'s container.")
+                sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.add-to-container", "{prefix} {amount} of {item} items added to {player}'s container.")
                         .replace("{amount}", String.valueOf(amount))
                         .replace("{item}", itemName)
                         .replace("{player}", receiver.getName())));
