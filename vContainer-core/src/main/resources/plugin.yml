@@ -3,6 +3,10 @@ version: '1.0'
 main: hu.vzone.vContainer.VContainer
 api-version: '1.21'
 author: MrVIRO
+softdepend:
+  - Oraxen
+  - MythicMobs
+
 commands:
   container:
     description: Open your container
