@@ -130,14 +130,14 @@
 
     <build>
         <plugins>
-            <!-- Java 17 -->
+            <!-- Java 21 -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.10.1</version>
                 <configuration>
-                    <source>17</source>
-                    <target>17</target>
+                    <source>21</source>
+                    <target>21</target>
                 </configuration>
             </plugin>
 
@@ -145,7 +145,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.3.0</version>
+                <version>3.5.0</version> <!-- frissítve -->
                 <executions>
                     <execution>
                         <phase>package</phase>
@@ -154,7 +154,6 @@
                         </goals>
                         <configuration>
                             <relocations>
-                                <!-- optional: avoid classpath conflicts -->
                                 <relocation>
                                     <pattern>hu.vzone.vcontainer.api</pattern>
                                     <shadedPattern>hu.vzone.vcontainer.internal.api</shadedPattern>
