@@ -32,15 +32,19 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
         this.hasMythicMobs = Bukkit.getPluginManager().isPluginEnabled("MythicMobs");
     }
 
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!sender.hasPermission("vcontainer.admin")) {
-            sender.sendMessage("§cNincs jogod ehhez a parancshoz.");
+            sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.no-permission", "{prefix} You don't have any permission!")));
             return true;
         }
 
         if (args.length == 0) {
-            sender.sendMessage("§7Használat: §e/vcontainer <open|clear|reload|give>");
+            List<String> helps = plugin.getMessageConfig().getStringList("admin-command.usage");
+            for (String help : helps){
+                sender.sendMessage(plugin.formatMessage(help));
+            }
             return true;
         }
 
@@ -49,34 +53,42 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
         switch (action) {
             case "reload":
                 plugin.reloadConfig();
-                sender.sendMessage("§aA VContainer konfiguráció újratöltve!");
+                plugin.reloadMessageConfig();
+                sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.reload", "{prefix} Plugin successfully reloaded!")));
                 return true;
 
             case "open":
             case "clear":
                 if (args.length < 2) {
-                    sender.sendMessage("§cHasználat: /vcontainer " + action + " <player>");
+                    List<String> helps = plugin.getMessageConfig().getStringList("admin-command.usage");
+                    for (String help : helps){
+                        sender.sendMessage(plugin.formatMessage(help));
+                    }
                     return true;
                 }
 
                 Player target = Bukkit.getPlayerExact(args[1]);
                 if (target == null) {
-                    sender.sendMessage("§cA játékos nem található vagy offline.");
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.player-not-found", "{prefix} The specific player not found! &8(&7{player}&8)").replace("{player}", args[1])));
                     return true;
                 }
 
+//                opened: "{prefix} You opened {player}'s container"
                 if (action.equals("open")) {
                     ContainerGUI.openContainer(target, manager, 1);
-                    sender.sendMessage("§aMegnyitva §f" + target.getName() + " §acontainer-e.");
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.open", "{prefix} You opened {player}'s container!").replace("{player}", target.getName())));
                 } else {
                     manager.clearContainer(target);
-                    sender.sendMessage("§eTörölve §f" + target.getName() + " §econtainer-e.");
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.clear", "{prefix} You cleared {player}'s container!").replace("{player}", target.getName())));
                 }
                 return true;
 
             case "give":
                 if (args.length < 3) {
-                    sender.sendMessage("§cHasználat: /vcontainer give <minecraft|oraxen|mythicmobs> <item> [player] [amount]");
+                    List<String> helps = plugin.getMessageConfig().getStringList("admin-command.usage");
+                    for (String help : helps){
+                        sender.sendMessage(plugin.formatMessage(help));
+                    }
                     return true;
                 }
 
@@ -91,7 +103,7 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                     try {
                         amount = Integer.parseInt(args[4]);
                     } catch (NumberFormatException e) {
-                        sender.sendMessage("§cÉrvénytelen mennyiség: " + args[4]);
+                        sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.invalid-amount", "{prefix} Invalid amount: {amount}").replace("{amount}", args[4])));
                         return true;
                     }
                 }
@@ -100,7 +112,7 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                     receiver = (Player) sender;
 
                 if (receiver == null) {
-                    sender.sendMessage("§cKérlek adj meg egy játékost!");
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.need-a-player", "{prefix} Please enter a player!")));
                     return true;
                 }
 
@@ -130,24 +142,26 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                             }
                         }
                     }
-
                     default -> {
-                        sender.sendMessage("§cIsmeretlen forrás: " + source);
+                        sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.unknown-source", "{prefix} Unknown source: {source}").replace("{source}", source)));
                         return true;
                     }
                 }
 
                 if (item == null) {
-                    sender.sendMessage("§cNem található item: " + itemName);
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.item-not-found", "{prefix} The specified item was not found. &8(&7{item}&8)").replace("{item}", itemName)));
                     return true;
                 }
 
                 manager.addItemToContainer(receiver, item);
-                sender.sendMessage("§aHozzáadva §f" + amount + "x " + itemName + " §aa §f" + receiver.getName() + " §acontaineréhez!");
+                sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.item-not-found", "{prefix} {amount} of {item} items added to {player}'s container.")
+                        .replace("{amount}", String.valueOf(amount))
+                        .replace("{item}", itemName)
+                        .replace("{player}", receiver.getName())));
                 return true;
-
             default:
-                sender.sendMessage("§cIsmeretlen művelet: " + action);
+                sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.unknown-action", "{prefix} Unknown action: {action}")
+                        .replace("{action}", action)));
                 return true;
         }
     }

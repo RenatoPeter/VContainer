@@ -10,21 +10,29 @@ import hu.vzone.vContainer.listeners.TesztL;
 import hu.vzone.vContainer.managers.ContainerManager;
 import hu.vzone.vcontainer.api.VContainerAPI;
 import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
+import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.event.HandlerList;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
+import java.io.IOException;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 public final class VContainer extends JavaPlugin {
 
+    private File messageConfigFile;
+    private FileConfiguration messageConfig;
     private static VContainer instance;
     private Gson gson;
     private File playerDataFolder;
     private FileConfiguration customConfig;
     private ContainerManager containerManager;
     private static VContainerAPI api;
+    private static final Pattern HEX_PATTERN = Pattern.compile("&#([A-Fa-f0-9]{6})");
 
     @Override
     public void onEnable() {
@@ -34,7 +42,7 @@ public final class VContainer extends JavaPlugin {
 
         saveDefaultConfig();
         loadCustomConfig();
-
+        createMessageConfig();
 
         playerDataFolder = new File(getDataFolder(), "player_data");
         if (!playerDataFolder.exists()) playerDataFolder.mkdirs();
@@ -45,13 +53,13 @@ public final class VContainer extends JavaPlugin {
         api = new VContainerAPIImpl(containerManager);
 
         // Commands
-        getCommand("container").setExecutor(new ContainerCommand(containerManager));
+        getCommand("container").setExecutor(new ContainerCommand(this, containerManager));
         getCommand("vcontainer").setExecutor(new ContainerAdminCommand(this, containerManager));
 
 
         // Events
-        Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager), this);
-        Bukkit.getPluginManager().registerEvents(new TesztL(containerManager), this);
+        Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, this), this);
+//        Bukkit.getPluginManager().registerEvents(new TesztL(containerManager), this);
 
 
         getLogger().info("VContainer v" + getDescription().getVersion() + " enabled");
@@ -74,5 +82,57 @@ public final class VContainer extends JavaPlugin {
     private void loadCustomConfig() {
         File file = new File(getDataFolder(), "config.yml");
         customConfig = YamlConfiguration.loadConfiguration(file);
+    }
+
+    public FileConfiguration getMessageConfig() {
+        return this.messageConfig;
+    }
+
+    private void createMessageConfig() {
+        messageConfigFile = new File(getDataFolder(), "messages.yml");
+        if (!messageConfigFile.exists()) {
+            messageConfigFile.getParentFile().mkdirs();
+            saveResource("messages.yml", false);
+        }
+
+        messageConfig = new YamlConfiguration();
+        try {
+            messageConfig.load(messageConfigFile);
+        } catch (IOException | InvalidConfigurationException e) {
+            e.printStackTrace();
+        }
+    }
+    public void reloadMessageConfig() {
+        if (messageConfigFile.exists()) {
+            messageConfig = YamlConfiguration.loadConfiguration(messageConfigFile);
+        } else {
+            Bukkit.getServer().getConsoleSender().sendMessage("§c[ERROR] VContainer | messages.yml not found.");
+            createMessageConfig();
+        }
+    }
+
+    public String getPrefix(){
+        return translateHexColorCodes(ChatColor.translateAlternateColorCodes('&', getMessageConfig().getString("prefix", "&#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8»&f")));
+    }
+
+    public static String formatMessage(String message) {
+        return translateHexColorCodes(ChatColor.translateAlternateColorCodes('&', message.replace("{prefix}", getInstance().getPrefix())));
+    }
+
+    private static String translateHexColorCodes(final String message) {
+        final char colorChar = ChatColor.COLOR_CHAR;
+        final Matcher matcher = HEX_PATTERN.matcher(message);
+        final StringBuffer buffer = new StringBuffer(message.length() + 4 * 8);
+
+        while (matcher.find()) {
+            final String group = matcher.group(1);
+
+            matcher.appendReplacement(buffer, colorChar + "x"
+                    + colorChar + group.charAt(0) + colorChar + group.charAt(1)
+                    + colorChar + group.charAt(2) + colorChar + group.charAt(3)
+                    + colorChar + group.charAt(4) + colorChar + group.charAt(5));
+        }
+
+        return matcher.appendTail(buffer).toString();
     }
 }

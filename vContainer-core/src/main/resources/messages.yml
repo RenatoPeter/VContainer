@@ -1,0 +1,27 @@
+prefix: "&#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8»&f"
+
+container:
+  take: "{prefix} You took {amount} of {item} out of the container."
+  inventory-full: "{prefix} Your inventory is full."
+
+command:
+  only-players-can-use: "{prefix} Only players can use this command!"
+
+admin-command:
+  no-permission: "{prefix} You don't have any permission!"
+  usage:
+    - "&8&m<---======[&r &#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8&m]======--->"
+    - "&f/vcontainer open <player> &8- &7Open a specific player container"
+    - "&f/vcontainer clear <player> &8- &7Clear a specific player container"
+    - "&f/vcontainer give <minecraft/or supported plugin> [player] [amount] &8- &7Put a specific item to container"
+    - "&f/vcontainer reload &8- &7Reload the plugin"
+  reload: "{prefix} Plugin successfully reloaded!"
+  player-not-found: "{prefix} The specific player not found! &8(&7{player}&8)"
+  open: "{prefix} You opened {player}'s container!"
+  clear: "{prefix} You cleared {player}'s container!"
+  invalid-amount: "{prefix} Invalid amount: {amount}"
+  need-a-player: "{prefix} Please enter a player!"
+  unknown-source: "{prefix} Unknown source: {source}"
+  item-not-found: "{prefix} The specified item was not found. &8(&7{item}&8)"
+  add-to-container: "{prefix} {amount} of {item} items added to {player}'s container."
+  unknown-action: "{prefix} Unknown action: {action}"

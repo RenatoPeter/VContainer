@@ -1,5 +1,6 @@
 package hu.vzone.vContainer.listeners;
 
+import hu.vzone.vContainer.VContainer;
 import hu.vzone.vContainer.gui.ContainerGUI;
 import hu.vzone.vContainer.managers.ContainerManager;
 import hu.vzone.vContainer.utils.ItemUtils;
@@ -15,9 +16,11 @@ import org.bukkit.inventory.ItemStack;
 
 public class ContainerListener implements Listener {
     private final ContainerManager manager;
+    private final VContainer plugin;
 
-    public ContainerListener(ContainerManager manager) {
+    public ContainerListener(ContainerManager manager, VContainer plugin) {
         this.manager = manager;
+        this.plugin = plugin;
     }
 
     @EventHandler
@@ -99,12 +102,15 @@ public class ContainerListener implements Listener {
                     manager.removeItemFromContainer(p, toTake);
                 }
 
-                p.sendMessage("§aKivettél §f" + given + "§ax " +
-                        (toTake.hasItemMeta() && toTake.getItemMeta().hasDisplayName()
-                                ? toTake.getItemMeta().getDisplayName()
-                                : toTake.getType().name()) + " §a-t a containerből!");
+                String take = plugin.getMessageConfig().getString("container.take", "{prefix} You took {amount} of {item} out of the container.");
+
+                p.sendMessage(plugin.formatMessage(take.replace("{amount}", String.valueOf(given)).replace("{item}", (toTake.hasItemMeta() && toTake.getItemMeta().hasDisplayName()
+                        ? toTake.getItemMeta().getDisplayName()
+                        : toTake.getType().name()))));
+
             } else {
-                p.sendMessage("§cNem fér már több nálad ebből az itemből!");
+                String inventoryFull = plugin.getMessageConfig().getString("container.inventory-full", "{prefix} Your inventory is full.");
+                p.sendMessage(plugin.formatMessage(inventoryFull));
             }
 
             p.updateInventory();
