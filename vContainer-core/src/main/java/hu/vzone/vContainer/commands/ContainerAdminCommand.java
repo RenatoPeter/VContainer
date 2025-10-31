@@ -3,7 +3,10 @@ package hu.vzone.vContainer.commands;
 import hu.vzone.vContainer.VContainer;
 import hu.vzone.vContainer.gui.ContainerGUI;
 import hu.vzone.vContainer.managers.ContainerManager;
+import io.lumine.mythic.api.adapters.AbstractItemStack;
+import io.lumine.mythic.bukkit.BukkitAdapter;
 import io.lumine.mythic.bukkit.MythicBukkit;
+import io.lumine.mythic.bukkit.adapters.BukkitItemStack;
 import io.lumine.mythic.core.items.MythicItem;
 import io.th0rgal.oraxen.api.OraxenItems;
 import org.bukkit.Bukkit;
@@ -135,13 +138,24 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
 
                     case "mythicmobs" -> {
                         if (hasMythicMobs) {
-                            MythicItem mythicItem = MythicBukkit.inst().getItemManager().getItem(itemName).orElse(null);
-                            if (mythicItem != null) {
-                                // 5.9.x API: generateItemStack() már közvetlenül Bukkit ItemStack-et ad
-                                item = (ItemStack) mythicItem.generateItemStack(amount);
+                            MythicBukkit mythicBukkit = MythicBukkit.inst();
+                            if (mythicBukkit == null || mythicBukkit.getItemManager() == null) break;
+
+                            for (MythicItem mythicItem : mythicBukkit.getItemManager().getItems()) {
+                                if (mythicItem.getInternalName().equalsIgnoreCase(itemName)) {
+                                    AbstractItemStack absItem = mythicItem.generateItemStack(1);
+                                    if (absItem != null) {
+                                        ItemStack bukkitItem = BukkitAdapter.adapt(absItem);
+                                        item = bukkitItem;
+                                        item.setAmount(amount);
+                                    }
+                                    break;
+                                }
                             }
                         }
                     }
+
+
                     default -> {
                         sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.unknown-source", "{prefix} Unknown source: {source}").replace("{source}", source)));
                         return true;

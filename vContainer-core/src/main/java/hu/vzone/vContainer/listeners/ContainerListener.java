@@ -105,12 +105,14 @@ public class ContainerListener implements Listener {
                         "{prefix} You took {amount} of {item} out of the container."
                 );
 
-                p.sendMessage(plugin.formatMessage(
-                        take.replace("{amount}", String.valueOf(given))
-                                .replace("{item}", (toTake.hasItemMeta() && toTake.getItemMeta().hasDisplayName()
-                                        ? toTake.getItemMeta().getDisplayName()
-                                        : toTake.getType().name()))
-                ));
+                if(p.hasPermission("vcontainer.notify")){
+                    p.sendMessage(plugin.formatMessage(
+                            take.replace("{amount}", String.valueOf(given))
+                                    .replace("{item}", (toTake.hasItemMeta() && toTake.getItemMeta().hasDisplayName()
+                                            ? toTake.getItemMeta().getDisplayName()
+                                            : toTake.getType().name()))
+                    ));
+                }
 
             } else {
                 String inventoryFull = plugin.getMessageConfig().getString(
