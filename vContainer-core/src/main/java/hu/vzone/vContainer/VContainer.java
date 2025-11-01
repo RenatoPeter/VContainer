@@ -36,40 +36,43 @@ public final class VContainer extends JavaPlugin {
 
     @Override
     public void onEnable() {
+        // FONTOS: ez legyen az ELSŐ SOR
         instance = this;
+
+        // GSON
         gson = new GsonBuilder().serializeNulls().create();
 
-
+        // Configok betöltése
         saveDefaultConfig();
         loadCustomConfig();
         createMessageConfig();
 
+        // Player data mappa
         playerDataFolder = new File(getDataFolder(), "player_data");
         if (!playerDataFolder.exists()) playerDataFolder.mkdirs();
 
-
+        // Manager és API inicializálás
         this.containerManager = new ContainerManager(this);
-
         api = new VContainerAPIImpl(containerManager);
 
-        // Commands
+        // Parancsok
         getCommand("container").setExecutor(new ContainerCommand(this, containerManager));
         getCommand("vcontainer").setExecutor(new ContainerAdminCommand(this, containerManager));
 
-
-        // Events
+        // Események
         Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, this), this);
-//        Bukkit.getPluginManager().registerEvents(new TesztL(containerManager), this);
 
-
-        getLogger().info("VContainer v" + getDescription().getVersion() + " enabled");
+        getLogger().info("✅ VContainer v" + getDescription().getVersion() + " enabled successfully!");
     }
 
     @Override
     public void onDisable() {
         HandlerList.unregisterAll(this);
-        // Plugin shutdown logic
+        api = null; // <--- biztonság kedvéért reseteljük
+        instance = null;
+        getLogger().info("🟥 VContainer disabled.");
     }
+
 
     public static VContainer getInstance() { return instance; }
     public Gson getGson() { return gson; }
