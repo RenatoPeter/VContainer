@@ -81,8 +81,6 @@ public final class VContainer extends JavaPlugin {
     public File getPlayerDataFolder() { return playerDataFolder; }
     public ContainerManager getContainerManager() { return containerManager; }
     public static VContainerAPI getAPI() {
-        instance = VContainer.getPlugin(VContainer.class);
-        api = new VContainerAPIImpl(VContainer.getInstance().getContainerManager());
         return api;
     }
 
