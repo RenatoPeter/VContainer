@@ -11,8 +11,8 @@
     <packaging>pom</packaging>
 
     <modules>
-        <module>vcontainer-api</module>
-        <module>vcontainer-core</module>
+        <module>vContainer-api</module>
+        <module>vContainer-core</module>
     </modules>
 
     <properties>

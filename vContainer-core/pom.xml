@@ -8,10 +8,9 @@
         <groupId>hu.vzone</groupId>
         <artifactId>vcontainer</artifactId>
         <version>1.0.0</version>
-        <relativePath>../pom.xml</relativePath>
     </parent>
 
-    <artifactId>vcontainer-core</artifactId>
+    <artifactId>VContainer</artifactId>
     <packaging>jar</packaging>
 
     <name>VContainer Plugin</name>
