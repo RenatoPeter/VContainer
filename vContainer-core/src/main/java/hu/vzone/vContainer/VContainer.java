@@ -55,6 +55,9 @@ public final class VContainer extends JavaPlugin {
         this.containerManager = new ContainerManager(this);
         api = new VContainerAPIImpl(containerManager);
 
+        // --- REGISZTRÁLÁS ---
+        Bukkit.getServicesManager().register(VContainerAPI.class, api, this, org.bukkit.plugin.ServicePriority.Normal);
+
         // Parancsok
         getCommand("container").setExecutor(new ContainerCommand(this, containerManager));
         getCommand("vcontainer").setExecutor(new ContainerAdminCommand(this, containerManager));
