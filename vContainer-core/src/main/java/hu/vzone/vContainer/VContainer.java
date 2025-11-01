@@ -74,11 +74,15 @@ public final class VContainer extends JavaPlugin {
     }
 
 
-    public static VContainer getInstance() { return instance; }
+    public static VContainer getInstance() {
+        return instance;
+    }
     public Gson getGson() { return gson; }
     public File getPlayerDataFolder() { return playerDataFolder; }
     public ContainerManager getContainerManager() { return containerManager; }
     public static VContainerAPI getAPI() {
+        instance = VContainer.getPlugin(VContainer.class);
+        api = new VContainerAPIImpl(VContainer.getInstance().getContainerManager());
         return api;
     }
 
