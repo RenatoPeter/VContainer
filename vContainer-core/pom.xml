@@ -153,12 +153,12 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
-                            <relocations>
-                                <relocation>
-                                    <pattern>hu.vzone.vcontainer.api</pattern>
-                                    <shadedPattern>hu.vzone.vcontainer.internal.api</shadedPattern>
-                                </relocation>
-                            </relocations>
+<!--                            <relocations>-->
+<!--                                <relocation>-->
+<!--                                    <pattern>hu.vzone.vcontainer.api</pattern>-->
+<!--                                    <shadedPattern>hu.vzone.vcontainer.internal.api</shadedPattern>-->
+<!--                                </relocation>-->
+<!--                            </relocations>-->
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                         </configuration>
                     </execution>
