@@ -5,18 +5,18 @@ import org.bukkit.inventory.InventoryHolder;
 
 public class ContainerHolder implements InventoryHolder {
 
-    private final String playerName;
+    private final String ownerName; // a container tulajdonosának neve
 
-    public ContainerHolder(String playerName) {
-        this.playerName = playerName;
+    public ContainerHolder(String ownerName) {
+        this.ownerName = ownerName;
     }
 
-    public String getPlayerName() {
-        return playerName;
+    public String getOwner() {
+        return ownerName;
     }
 
     @Override
     public Inventory getInventory() {
-        return null;
+        return null; // nem kell tényleges inventoryt visszaadnunk
     }
 }

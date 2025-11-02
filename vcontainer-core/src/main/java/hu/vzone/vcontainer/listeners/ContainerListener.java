@@ -6,6 +6,7 @@ import hu.vzone.vcontainer.utils.ContainerHolder;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.utils.ItemUtils;
 import hu.vzone.vcontainer.utils.PlayerViewingCache;
+import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -47,11 +48,30 @@ public class ContainerListener implements Listener {
 
         // --- Oldalváltás ---
         if (slot == controlRowStart + 3 && page > 1) {
-            ContainerGUI.openContainer(p, manager, page - 1);
+            if (topInv.getHolder() instanceof ContainerHolder holder) {
+                String ownerName = holder.getOwner(); // ContainerHolder-ben tárolt tulajdonos neve
+                Player owner = Bukkit.getPlayerExact(ownerName);
+                if (owner != null && !owner.equals(p)) {
+                    // Admin nézi más containerét
+                    ContainerGUI.openContainerForAdmin(p, owner, manager, page - 1);
+                } else {
+                    // Sajátját nézi
+                    ContainerGUI.openContainer(p, manager, page - 1);
+                }
+            }
             return;
         }
+
         if (slot == controlRowStart + 5 && page < max) {
-            ContainerGUI.openContainer(p, manager, page + 1);
+            if (topInv.getHolder() instanceof ContainerHolder holder) {
+                String ownerName = holder.getOwner();
+                Player owner = Bukkit.getPlayerExact(ownerName);
+                if (owner != null && !owner.equals(p)) {
+                    ContainerGUI.openContainerForAdmin(p, owner, manager, page + 1);
+                } else {
+                    ContainerGUI.openContainer(p, manager, page + 1);
+                }
+            }
             return;
         }
 

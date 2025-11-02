@@ -77,7 +77,8 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
 
 //                opened: "{prefix} You opened {player}'s container"
                 if (action.equals("open")) {
-                    ContainerGUI.openContainer(target, manager, 1);
+                    Player admin = (Player) sender;
+                    ContainerGUI.openContainerForAdmin(admin,target, manager, 1);
                     sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.open", "{prefix} You opened {player}'s container!").replace("{player}", target.getName())));
                 } else {
                     manager.clearContainer(target);

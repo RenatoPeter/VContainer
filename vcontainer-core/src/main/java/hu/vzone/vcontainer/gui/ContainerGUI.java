@@ -78,4 +78,52 @@ public class ContainerGUI {
         // --- Megnyitott oldal mentése cache-be ---
         PlayerViewingCache.setViewing(player, page, maxPage);
     }
+
+    public static void openContainerForAdmin(Player admin, Player player, ContainerManager manager, int page) {
+        List<ItemStack> all = manager.getAllItemFromContainer(player);
+        int itemsPerPage = defaultContentSlots.length; // 45
+        int maxPage = Math.max(1, (int) Math.ceil((double) all.size() / itemsPerPage));
+        if (page < 1) page = 1;
+        if (page > maxPage) page = maxPage;
+
+        // --- Title betöltése a configból ---
+        String title = Bukkit.getPluginManager()
+                .getPlugin("VContainer")
+                .getConfig()
+                .getString("title", "§0Container %current-page%/%max-page%");
+        title = title
+                .replace("%current-page%", String.valueOf(page))
+                .replace("%max-page%", String.valueOf(maxPage));
+        title = VContainer.formatMessage(title);
+
+        // --- Itt jön a fő javítás: saját ContainerHolder ---
+        Inventory inv = Bukkit.createInventory(new ContainerHolder(player.getName()), SLOTS, title);
+
+        // --- Tartalom elhelyezése ---
+        int startIndex = (page - 1) * itemsPerPage;
+        for (int i = 0; i < itemsPerPage; i++) {
+            int globalIndex = startIndex + i;
+            if (globalIndex >= all.size()) break;
+            ItemStack stack = all.get(globalIndex).clone();
+            int slot = defaultContentSlots[i];
+            inv.setItem(slot, stack);
+        }
+
+        // --- Navigációs gombok ---
+        if (page > 1) {
+            inv.setItem(CONTROL_ROW_INDEX * 9 + 3, Buttons.buildButton("prev"));
+        }
+        if (page < maxPage) {
+            inv.setItem(CONTROL_ROW_INDEX * 9 + 5, Buttons.buildButton("next"));
+        }
+
+        // --- Alul üres helyek feltöltése üveggel ---
+        InventoryFill.fillBottomRow(inv);
+
+        // --- GUI megnyitása ---
+        admin.openInventory(inv);
+
+        // --- Megnyitott oldal mentése cache-be ---
+        PlayerViewingCache.setViewing(admin, page, maxPage);
+    }
 }
