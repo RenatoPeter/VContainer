@@ -1,13 +1,12 @@
-package hu.vzone.vContainer;
+package hu.vzone.vcontainer;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import hu.vzone.vContainer.api.impl.VContainerAPIImpl;
-import hu.vzone.vContainer.commands.ContainerAdminCommand;
-import hu.vzone.vContainer.commands.ContainerCommand;
-import hu.vzone.vContainer.listeners.ContainerListener;
-import hu.vzone.vContainer.listeners.TesztL;
-import hu.vzone.vContainer.managers.ContainerManager;
+import hu.vzone.vcontainer.api.impl.VContainerAPIImpl;
+import hu.vzone.vcontainer.commands.ContainerAdminCommand;
+import hu.vzone.vcontainer.commands.ContainerCommand;
+import hu.vzone.vcontainer.listeners.ContainerListener;
+import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.api.VContainerAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;

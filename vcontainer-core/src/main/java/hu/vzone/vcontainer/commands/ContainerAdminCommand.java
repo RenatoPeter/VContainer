@@ -1,12 +1,11 @@
-package hu.vzone.vContainer.commands;
+package hu.vzone.vcontainer.commands;
 
-import hu.vzone.vContainer.VContainer;
-import hu.vzone.vContainer.gui.ContainerGUI;
-import hu.vzone.vContainer.managers.ContainerManager;
+import hu.vzone.vcontainer.VContainer;
+import hu.vzone.vcontainer.gui.ContainerGUI;
+import hu.vzone.vcontainer.managers.ContainerManager;
 import io.lumine.mythic.api.adapters.AbstractItemStack;
 import io.lumine.mythic.bukkit.BukkitAdapter;
 import io.lumine.mythic.bukkit.MythicBukkit;
-import io.lumine.mythic.bukkit.adapters.BukkitItemStack;
 import io.lumine.mythic.core.items.MythicItem;
 import io.th0rgal.oraxen.api.OraxenItems;
 import org.bukkit.Bukkit;

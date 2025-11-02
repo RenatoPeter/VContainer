@@ -1,4 +1,4 @@
-package hu.vzone.vContainer.utils;
+package hu.vzone.vcontainer.utils;
 
 import org.bukkit.entity.Player;
 

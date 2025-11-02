@@ -1,11 +1,11 @@
-package hu.vzone.vContainer.gui;
+package hu.vzone.vcontainer.gui;
 
-import hu.vzone.vContainer.VContainer;
-import hu.vzone.vContainer.managers.ContainerManager;
-import hu.vzone.vContainer.utils.Buttons;
-import hu.vzone.vContainer.utils.ContainerHolder;
-import hu.vzone.vContainer.utils.InventoryFill;
-import hu.vzone.vContainer.utils.PlayerViewingCache;
+import hu.vzone.vcontainer.VContainer;
+import hu.vzone.vcontainer.managers.ContainerManager;
+import hu.vzone.vcontainer.utils.Buttons;
+import hu.vzone.vcontainer.utils.ContainerHolder;
+import hu.vzone.vcontainer.utils.InventoryFill;
+import hu.vzone.vcontainer.utils.PlayerViewingCache;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.Inventory;

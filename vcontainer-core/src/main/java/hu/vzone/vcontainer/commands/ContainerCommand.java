@@ -1,8 +1,8 @@
-package hu.vzone.vContainer.commands;
+package hu.vzone.vcontainer.commands;
 
-import hu.vzone.vContainer.VContainer;
-import hu.vzone.vContainer.gui.ContainerGUI;
-import hu.vzone.vContainer.managers.ContainerManager;
+import hu.vzone.vcontainer.VContainer;
+import hu.vzone.vcontainer.gui.ContainerGUI;
+import hu.vzone.vcontainer.managers.ContainerManager;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;

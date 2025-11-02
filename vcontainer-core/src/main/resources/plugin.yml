@@ -1,6 +1,6 @@
 name: VContainer
 version: '1.0'
-main: hu.vzone.vContainer.VContainer
+main: hu.vzone.vcontainer.VContainer
 api-version: '1.21'
 author: MrVIRO
 softdepend:

@@ -1,6 +1,6 @@
-package hu.vzone.vContainer.utils;
+package hu.vzone.vcontainer.utils;
 
-import hu.vzone.vContainer.VContainer;
+import hu.vzone.vcontainer.VContainer;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.inventory.ItemFlag;

@@ -1,6 +1,6 @@
-package hu.vzone.vContainer.listeners;
+package hu.vzone.vcontainer.listeners;
 
-import hu.vzone.vContainer.managers.ContainerManager;
+import hu.vzone.vcontainer.managers.ContainerManager;
 import org.bukkit.Material;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;

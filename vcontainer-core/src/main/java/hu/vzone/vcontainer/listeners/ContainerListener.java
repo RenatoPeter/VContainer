@@ -1,11 +1,11 @@
-package hu.vzone.vContainer.listeners;
+package hu.vzone.vcontainer.listeners;
 
-import hu.vzone.vContainer.VContainer;
-import hu.vzone.vContainer.gui.ContainerGUI;
-import hu.vzone.vContainer.utils.ContainerHolder;
-import hu.vzone.vContainer.managers.ContainerManager;
-import hu.vzone.vContainer.utils.ItemUtils;
-import hu.vzone.vContainer.utils.PlayerViewingCache;
+import hu.vzone.vcontainer.VContainer;
+import hu.vzone.vcontainer.gui.ContainerGUI;
+import hu.vzone.vcontainer.utils.ContainerHolder;
+import hu.vzone.vcontainer.managers.ContainerManager;
+import hu.vzone.vcontainer.utils.ItemUtils;
+import hu.vzone.vcontainer.utils.PlayerViewingCache;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;

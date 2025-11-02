@@ -1,7 +1,7 @@
-package hu.vzone.vContainer.managers;
+package hu.vzone.vcontainer.managers;
 
-import hu.vzone.vContainer.VContainer;
-import hu.vzone.vContainer.utils.ItemUtils;
+import hu.vzone.vcontainer.VContainer;
+import hu.vzone.vcontainer.utils.ItemUtils;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
