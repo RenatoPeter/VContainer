@@ -13,7 +13,7 @@
     <artifactId>VContainer</artifactId>
     <packaging>jar</packaging>
 
-    <name>VContainer Plugin</name>
+    <name>VContainer</name>
     <description>The main plugin implementation</description>
 
     <repositories>
