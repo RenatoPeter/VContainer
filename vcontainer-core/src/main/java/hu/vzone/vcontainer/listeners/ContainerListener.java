@@ -12,6 +12,7 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryCloseEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
 
@@ -27,18 +28,16 @@ public class ContainerListener implements Listener {
 
     @EventHandler
     public void onClick(InventoryClickEvent e) {
-        if (!(e.getWhoClicked() instanceof Player)) return;
-        Player p = (Player) e.getWhoClicked();
+        if (!(e.getWhoClicked() instanceof Player p)) return;
 
         Inventory topInv = e.getView().getTopInventory();
-        if (!(topInv.getHolder() instanceof ContainerHolder)) return; // ✅ csak a VContainer GUI-ra reagál
+        if (!(topInv.getHolder() instanceof ContainerHolder)) return;
 
         e.setCancelled(true);
-
         ItemStack clicked = e.getCurrentItem();
         if (clicked == null) return;
 
-        PlayerViewingCache.PageInfo info = PlayerViewingCache.getViewing(p);
+        PlayerViewingCache.PageInfo info = PlayerViewingCache.getViewing(p.getUniqueId());
         int page = (info != null ? info.current : 1);
         int max = (info != null ? info.max : 1);
 
@@ -46,44 +45,36 @@ public class ContainerListener implements Listener {
         int rows = topInv.getSize() / 9;
         int controlRowStart = (rows - 1) * 9;
 
-        // --- Oldalváltás ---
+        // Oldalváltás
         if (slot == controlRowStart + 3 && page > 1) {
             if (topInv.getHolder() instanceof ContainerHolder holder) {
-                String ownerName = holder.getOwner(); // ContainerHolder-ben tárolt tulajdonos neve
-                Player owner = Bukkit.getPlayerExact(ownerName);
-                if (owner != null && !owner.equals(p)) {
-                    // Admin nézi más containerét
+                Player owner = Bukkit.getPlayerExact(holder.getOwner());
+                if (owner != null && !owner.equals(p))
                     ContainerGUI.openContainerForAdmin(p, owner, manager, page - 1);
-                } else {
-                    // Sajátját nézi
+                else
                     ContainerGUI.openContainer(p, manager, page - 1);
-                }
             }
             return;
         }
 
         if (slot == controlRowStart + 5 && page < max) {
             if (topInv.getHolder() instanceof ContainerHolder holder) {
-                String ownerName = holder.getOwner();
-                Player owner = Bukkit.getPlayerExact(ownerName);
-                if (owner != null && !owner.equals(p)) {
+                Player owner = Bukkit.getPlayerExact(holder.getOwner());
+                if (owner != null && !owner.equals(p))
                     ContainerGUI.openContainerForAdmin(p, owner, manager, page + 1);
-                } else {
+                else
                     ContainerGUI.openContainer(p, manager, page + 1);
-                }
             }
             return;
         }
 
-        // --- Item kivétel a containerből ---
+        // Item kivétel
         if (slot < controlRowStart) {
             ItemStack toTake = clicked.clone();
             Inventory inv = p.getInventory();
-
             int amountToGive = toTake.getAmount();
             int remaining = amountToGive;
 
-            // Stackelés meglévő itemekkel
             for (int i = 0; i < inv.getSize(); i++) {
                 ItemStack current = inv.getItem(i);
                 if (current == null) continue;
@@ -99,7 +90,6 @@ public class ContainerListener implements Listener {
                 if (remaining <= 0) break;
             }
 
-            // Ha maradt még és van üres slot
             while (remaining > 0 && inv.firstEmpty() != -1) {
                 int add = Math.min(remaining, toTake.getMaxStackSize());
                 ItemStack newStack = toTake.clone();
@@ -108,7 +98,6 @@ public class ContainerListener implements Listener {
                 remaining -= add;
             }
 
-            // Amit sikerült odaadni
             int given = amountToGive - remaining;
             if (given > 0) {
                 ItemStack newContainerItem = toTake.clone();
@@ -125,7 +114,7 @@ public class ContainerListener implements Listener {
                         "{prefix} You took {amount} of {item} out of the container."
                 );
 
-                if(p.hasPermission("vcontainer.notify")){
+                if (p.hasPermission("vcontainer.notify")) {
                     p.sendMessage(plugin.formatMessage(
                             take.replace("{amount}", String.valueOf(given))
                                     .replace("{item}", (toTake.hasItemMeta() && toTake.getItemMeta().hasDisplayName()
@@ -149,11 +138,16 @@ public class ContainerListener implements Listener {
 
     @EventHandler
     public void onClose(InventoryCloseEvent e) {
-        if (!(e.getPlayer() instanceof Player)) return;
-        Player p = (Player) e.getPlayer();
+        if (!(e.getPlayer() instanceof Player p)) return;
+        if (!(e.getView().getTopInventory().getHolder() instanceof ContainerHolder)) return;
+        PlayerViewingCache.remove(p.getUniqueId());
+    }
 
-        Inventory topInv = e.getView().getTopInventory();
-        if (!(topInv.getHolder() instanceof ContainerHolder)) return; // ✅ csak a container GUI-nál
-        PlayerViewingCache.remove(p);
+    // 👇 Megelőzi a memory leaket: amikor a játékos kilép, eltávolítjuk a cache-ből
+    @EventHandler
+    public void onQuit(PlayerQuitEvent e) {
+        Player p = e.getPlayer();
+        PlayerViewingCache.remove(p.getUniqueId());
+        manager.clearCacheFor(p.getUniqueId());
     }
 }

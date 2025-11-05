@@ -76,7 +76,7 @@ public class ContainerGUI {
         player.openInventory(inv);
 
         // --- Megnyitott oldal mentése cache-be ---
-        PlayerViewingCache.setViewing(player, page, maxPage);
+        PlayerViewingCache.setViewing(player.getUniqueId(), page, maxPage);
     }
 
     public static void openContainerForAdmin(Player admin, Player player, ContainerManager manager, int page) {
@@ -124,6 +124,6 @@ public class ContainerGUI {
         admin.openInventory(inv);
 
         // --- Megnyitott oldal mentése cache-be ---
-        PlayerViewingCache.setViewing(admin, page, maxPage);
+        PlayerViewingCache.setViewing(admin.getUniqueId(), page, maxPage);
     }
 }

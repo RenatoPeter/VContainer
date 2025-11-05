@@ -134,4 +134,8 @@ public class ContainerManager {
             return new ArrayList<>();
         }
     }
+    public void clearCacheFor(UUID playerId) {
+        cache.remove(playerId);
+    }
+
 }
