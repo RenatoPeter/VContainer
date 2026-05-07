@@ -8,6 +8,8 @@
         <outputRelativeToContentRoot value="true" />
         <module name="vContainer-core" />
         <module name="vContainer-api" />
+        <module name="vcontainer-api" />
+        <module name="VContainer (2)" />
       </profile>
     </annotationProcessing>
   </component>

@@ -2,9 +2,8 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/VContainer.iml" filepath="$PROJECT_DIR$/VContainer.iml" />
-      <module fileurl="file://$PROJECT_DIR$/vContainer-api/vContainer-api.iml" filepath="$PROJECT_DIR$/vContainer-api/vContainer-api.iml" />
-      <module fileurl="file://$PROJECT_DIR$/vContainer-core/vContainer-core.iml" filepath="$PROJECT_DIR$/vContainer-core/vContainer-core.iml" />
+      <module fileurl="file://$PROJECT_DIR$/vcontainer-core/VContainer (2).iml" filepath="$PROJECT_DIR$/vcontainer-core/VContainer (2).iml" />
+      <module fileurl="file://$PROJECT_DIR$/vcontainer-api/vcontainer-api.iml" filepath="$PROJECT_DIR$/vcontainer-api/vcontainer-api.iml" />
     </modules>
   </component>
 </project>
