@@ -1,0 +1,259 @@
+Introduction
+Library for creating simple GUIs in Bukkit plugins.
+
+license
+Triumph GUI
+license release language
+
+#Features
+Simple to use.
+Per item action.
+Slot specific actions.
+Close and Open actions.
+Pagination GUI.
+Scrolling GUI.
+Item Builder.
+#Contributing
+Contributions, issues and feature requests are welcome! Feel free to check issues page.
+
+#Show your support
+Give a star on GitHub if this project helped you!
+
+#License
+Copyright © 2021 TriumphTeam. This project is MIT licensed.
+
+Setup
+Adding the library to your project.
+
+You need to add the dependency to your pom.xml.
+
+<dependency>
+    <groupId>dev.triumphteam</groupId>
+    <artifactId>triumph-gui</artifactId>
+    <version>%version%</version>
+</dependency>
+To include the framework in your project, you need to add the following to your pom.xml, in the plugins section.
+Replace [YOUR PACKAGE]with your plugin's package, for example me.myplugin.plugin.
+
+<plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-shade-plugin</artifactId>
+    <version>3.6.0</version>
+    <configuration>
+        <relocations>
+            <relocation>
+                <pattern>dev.triumphteam.gui</pattern>
+                <shadedPattern>[YOUR PACKAGE].gui</shadedPattern> <!-- Replace package here here -->
+            </relocation>
+        </relocations>
+    </configuration>
+    <executions>
+        <execution>
+            <phase>package</phase>
+            <goals>
+                <goal>shade</goal>
+            </goals>
+        </execution>
+    </executions>
+</plugin>
+
+GUI
+This is how you create a basic GUI
+
+#GUI
+
+
+#Creating a GUI
+To create a GUI all you need to do is:
+
+Gui gui = Gui.gui()
+        .title(Component.text("GUI Title!"))
+        .rows(6)
+        .create();
+#Creating a Typed GUI
+Gui gui = Gui.gui()
+        .title(Component.text("GUI Title!"))
+        .type(GuiType.DISPENSER)
+        .create();
+If the type is not specified, it'll fall back to GuiType.CHEST.
+
+Current supported GUI types:
+
+CHEST - Default - 0 to 53 slots
+WORKBENCH - 0 to 9 slots
+HOPPER - 0 to 4 slots
+DISPENSER - 0 to 8 slots
+BREWING - 0 to 4 slots
+#Creating a GUI item
+Each item added to the GUI need to be a GuiItem.
+
+// Alternatively you can use the ItemBuilder
+GuiItem guiItem = ItemBuilder.from(Material.STONE).asGuiItem();
+GuiItem guiItem = ItemBuilder.from(Material.STONE).asGuiItem(event -> {
+    // Handle your click action here
+});
+Each GUI item needs an item stack, the click action is optional.
+The action for an item is simply the InventoryClickEvent so handle it like you would be doing in your own listener.
+
+#Adding the item to the GUI
+Now that we have our GuiItem, we can easily add it to the GUI.
+
+// Using a slot number from 0 to 53
+gui.setItem(slot, guiItem);
+
+// Using rows and columns
+gui.setItem(row, col, guiItem);
+
+// Using add item to add to next free slot
+gui.addItem(guiItem);
+As an example: slot 0 would be row: 1, col: 1.
+What option you choose is up to you.
+
+Attention: if you specify a slot that exceeds the GUI limit it'll throw a GuiException.
+
+#Opening the GUI
+To open the GUI to the player you just need to call the method open.
+
+gui.open(player);
+
+PaginatedGUI
+Simple GUI that allows you to have multiple pages and navigate between them.
+
+#Paginated GUI
+
+
+#Creating a Paginated GUI
+To create a Paginated GUI all you need to do is:
+
+// Main constructor
+PaginatedGui gui = Gui.paginated()
+        .title(Component.text("GUI Title!"))
+        .rows(6)
+        .pageSize(45) // Set the size you want, or leave it to be automatic.
+        .create();
+If the pagesize is not set, the lib will calculate the size when opening the GUI.
+In this example we use pageSize 45
+
+#Creating the navigation
+To create the navigation items we can simply do:
+
+// Previous item
+paginatedGui.setItem(6, 3, ItemBuilder.from(Material.PAPER).setName("Previous").asGuiItem(event -> paginatedGui.previous()));
+// Next item
+paginatedGui.setItem(6, 7, ItemBuilder.from(Material.PAPER).setName("Next").asGuiItem(event -> paginatedGui.next()));
+It is recommended to add a default click action to your GUI to cancel the click when working with pagination, if not, make sure to cancel the click before calling PaginatedGui#next/previous.
+
+#Populating the page
+To add items to the page once again we use the PaginatedGui#addItem which takes a GuiItem.
+Items added with PaginatedGui#setItem will not be counted towards the page but as static GUI items.
+
+ScrollingGUI
+Simple GUI that allows you to scroll on a Paginated GUI instead of going page by page.
+
+#Scrolling GUI
+
+
+#Creating a Scrolling GUI
+To create a Scrolling GUI It's pretty straight forward:
+
+ScrollingGui gui = Gui.scrolling()
+        .title(Component.text("GUI Title!"))
+        .rows(6)
+        .pageSize(45)
+        .scrollType(ScrollType.HORIZONTAL)
+        .create();
+The scrollType if not specified will fall back to ScrollType.VERTICAL
+
+Just like the normal GUI the first parameter is the rows the GUI should have. Like the Paginated GUI the second parameter is to specify the page size, as in how big the page should be, in the example above it's 45 slots dedicated for the page.
+
+Everything else about this GUI is exactly like the Paginated.
+StorageGUI
+GUI that does not clear its items on close/open, any external non GuiItem added to it will stay.
+
+Attention! Items stored inside this GUI will not Persist on Server Restart.
+
+#Storage GUI
+
+
+#Creating a Persistent GUI
+To create a persistent GUI all you need to do is:
+
+StorageGui gui = Gui.storage()
+        .title(Component.text("GUI Title!"))
+        .rows(6)
+        .create();
+Just like the normal GUI the first parameter is the rows the GUI should have.
+
+#Adding the item to the GUI
+Differently to the normal GUI, the addItem method takes an ItemStack instead. Any GuiItem added will have actions applied to it; the persistent items are simple ItemStacks that have nothing associated to it.
+GUI Features
+After the basics of a GUI there is a lot more useful features you can use.
+
+#Common features
+The following are the common features in all GUIs.
+
+#Filler
+The GUI filler allows you to fill in the GUI in many ways, for example, completely filling or filling the bottom or top of the GUI. You can get the filler by doing GUI#getFiller.
+
+Setting you fill item will fill the slots in your GUI that doesn't contain a GUI item.
+
+// Single fill item
+gui.getFiller().fill(ItemBuilder.from(Material.BLACK_STAINED_GLASS_PANE).asGuiItem());
+
+// Multiple fill items
+gui.getFiller().fill(Arrays.asList(ItemBuilder.from(Material.BLACK_STAINED_GLASS_PANE).asGuiItem(), ItemBuilder.from(Material.WHITE_STAINED_GLASS_PANE).asGuiItem()));
+Just like any other item these items can also have a click action, but they'll be the same for all the slots it is filled.
+
+#Set default click action
+You can also set a default click action, which will be applied to every single slot in the GUI. For example if you call event.setCancelled(true) as your default action, you no longer need to cancel it for every single item.
+
+gui.setDefaultClickAction(event -> {
+    // Handle your default action here
+});
+#Set close GUI action
+This will display the action you set when ever the GUI is closed.
+The event passed down for this action is the InventoryCloseEvent.
+
+gui.setCloseGuiAction(event -> {
+    // Handle your close action
+});
+#Set open GUI action
+This will display the action you set when ever the GUI is open .
+The event passed down for this action is the InventoryOpenEvent.
+
+gui.setOpenGuiAction(event -> {
+    // Handle your open action
+});
+#Slot actions
+If you want to add a click action to a specif slot without needing to have to specify the item in the slot, you can simply use the setSlotAction.
+It also supports both rows and columns and slots.
+
+// With slot
+gui.addSlotAction(slot, event -> {
+    // Handle your open action
+});
+
+// With rows and columns
+gui.addSlotAction(row, col, event -> {
+    // Handle your open action
+});
+#Update
+The update method will update the entire GUI except the title, due to how inventories work.
+
+gui.update();
+#Update title
+This will also update the title, but you need to pass the new title down. This feature has not been tested enough.
+
+gui.updateTitle(Component.text("New Title"));
+#Update Item
+This is the preferable way of making updates in your GUI, for example an item that keeps refreshing, etc.
+This is recommended over the other ones as it'll simply change one item instead of the whole GUI.
+It also supports both rows and columns and slots.
+
+// Using slots
+gui.updateItem(slot, new ItemStack(Material.STONE));
+
+// Using rows and columns
+gui.updateItem(row, col, new ItemStack(Material.STONE));
+#Item Builder
+Triumph-GUI already comes with a built in ItemBuilder to make it easier for you to create custom items.

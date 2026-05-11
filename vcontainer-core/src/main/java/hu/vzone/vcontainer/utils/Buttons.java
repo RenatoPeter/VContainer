@@ -14,24 +14,22 @@ public class Buttons {
 
     public static ItemStack buildButton(String path) {
         ConfigurationSection section = VContainer.getInstance().getConfig().getConfigurationSection("buttons." + path);
-        if (section == null) return null;
+        if (section == null) return new ItemStack(Material.BARRIER);
 
-        String matName = section.getString("material", "BARRIER");
-        Material material = Material.matchMaterial(matName);
+        Material material = Material.matchMaterial(section.getString("material", "BARRIER"));
         if (material == null) material = Material.BARRIER;
 
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(VContainer.formatMessage(section.getString("name", "§cUnnamed")));
-            List<String> loreRaw = section.getStringList("lore");
-            List<String> loreFormated = new ArrayList<>();
-            if (loreRaw == null) {
-                for(String l : loreRaw){
-                    loreFormated.add(VContainer.formatMessage(l));
-                }
+            meta.setDisplayName(VContainer.formatMessage(section.getString("name", "&cUnnamed")));
+
+            List<String> loreFormatted = new ArrayList<>();
+            for (String line : section.getStringList("lore")) {
+                loreFormatted.add(VContainer.formatMessage(line));
             }
-            meta.setLore(loreFormated);
+            meta.setLore(loreFormatted);
+
             meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
             item.setItemMeta(meta);
         }
@@ -41,7 +39,7 @@ public class Buttons {
     public static int getButtonSlot(String path) {
         ConfigurationSection section = VContainer.getInstance().getConfig().getConfigurationSection("buttons." + path);
         if (section == null) return -1;
-        // pl. slot: 45+3 → értékeljük ki
+
         String slotExpr = section.getString("slot", "0");
         try {
             if (slotExpr.contains("+")) {

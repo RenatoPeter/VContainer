@@ -3,6 +3,10 @@ package hu.vzone.vcontainer.commands;
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.managers.ContainerManager;
+import hu.vzone.vcontainer.managers.StorageBlockManager;
+import hu.vzone.vcontainer.utils.PermissionUtils;
+import hu.vzone.vcontainer.utils.StorageBlockItem;
+import dev.lone.itemsadder.api.CustomStack;
 import io.lumine.mythic.api.adapters.AbstractItemStack;
 import io.lumine.mythic.bukkit.BukkitAdapter;
 import io.lumine.mythic.bukkit.MythicBukkit;
@@ -15,6 +19,7 @@ import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
 import org.bukkit.entity.Player;
+import org.bukkit.block.Block;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.*;
@@ -24,20 +29,24 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
 
     private final VContainer plugin;
     private final ContainerManager manager;
+    private final StorageBlockManager storageBlockManager;
     private final boolean hasOraxen;
     private final boolean hasMythicMobs;
+    private final boolean hasItemsAdder;
 
-    public ContainerAdminCommand(VContainer plugin, ContainerManager manager) {
+    public ContainerAdminCommand(VContainer plugin, ContainerManager manager, StorageBlockManager storageBlockManager) {
         this.plugin = plugin;
         this.manager = manager;
+        this.storageBlockManager = storageBlockManager;
         this.hasOraxen = Bukkit.getPluginManager().isPluginEnabled("Oraxen");
         this.hasMythicMobs = Bukkit.getPluginManager().isPluginEnabled("MythicMobs");
+        this.hasItemsAdder = Bukkit.getPluginManager().isPluginEnabled("ItemsAdder");
     }
 
 
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (!sender.hasPermission("vcontainer.admin")) {
+        if (!PermissionUtils.has(sender, "vcontainer.admin")) {
             sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.no-permission", "{prefix} You don't have any permission!")));
             return true;
         }
@@ -56,8 +65,56 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
             case "reload":
                 plugin.reloadConfig();
                 plugin.reloadMessageConfig();
+                plugin.reloadMenuConfigs();
+                storageBlockManager.reloadHolograms();
                 sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.reload", "{prefix} Plugin successfully reloaded!")));
                 return true;
+
+            case "set":
+                if (!(sender instanceof Player player)) {
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.only-players-can-use", "{prefix} Only players can use this command!")));
+                    return true;
+                }
+                if (!PermissionUtils.has(sender, "vcontainer.admin.set")) {
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.no-permission", "{prefix} You don't have any permission!")));
+                    return true;
+                }
+
+                int distance = plugin.getConfig().getInt("storage-block.set-target-distance", 6);
+                Block targetBlock = player.getTargetBlockExact(distance);
+                if (targetBlock == null || targetBlock.getType().isAir()) {
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("storage-block.no-target", "{prefix} Look at a block first.")));
+                    return true;
+                }
+
+                if (!storageBlockManager.add(targetBlock)) {
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("storage-block.already-set", "{prefix} This block is already a storage block.")));
+                    return true;
+                }
+
+                sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("storage-block.set", "{prefix} Storage block created.")));
+                return true;
+
+            case "give-block": {
+                GiveBlockArgs parsed = parseGiveBlockArgs(sender, args);
+                if (parsed == null) return true;
+
+                ItemStack item = StorageBlockItem.build(plugin, parsed.amount());
+                parsed.receiver().getInventory().addItem(item);
+
+                if (!parsed.silent()) {
+                    parsed.receiver().sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString(
+                            "storage-block.received",
+                            "{prefix} You received {amount} storage block item(s)."
+                    ).replace("{amount}", String.valueOf(parsed.amount()))));
+                }
+
+                sender.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString(
+                        "admin-command.give-block",
+                        "{prefix} You gave {amount} storage block item(s) to {player}."
+                ).replace("{amount}", String.valueOf(parsed.amount())).replace("{player}", parsed.receiver().getName())));
+                return true;
+            }
 
             case "open":
             case "clear":
@@ -77,6 +134,10 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
 
 //                opened: "{prefix} You opened {player}'s container"
                 if (action.equals("open")) {
+                    if (!(sender instanceof Player)) {
+                        sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.only-players-can-use", "{prefix} Only players can use this command!")));
+                        return true;
+                    }
                     Player admin = (Player) sender;
                     ContainerGUI.openContainerForAdmin(admin,target, manager, 1);
                     sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.open", "{prefix} You opened {player}'s container!").replace("{player}", target.getName())));
@@ -110,6 +171,10 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                         return true;
                     }
                 }
+                if (amount <= 0) {
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.invalid-amount", "{prefix} Invalid amount: {amount}").replace("{amount}", String.valueOf(amount))));
+                    return true;
+                }
 
                 if (receiver == null && sender instanceof Player)
                     receiver = (Player) sender;
@@ -130,9 +195,13 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
 
                     case "oraxen" -> {
                         if (hasOraxen && OraxenItems.exists(itemName)) {
-                            item = OraxenItems.getItemById(itemName).build();
-                            if (item != null)
+                            var builder = OraxenItems.getItemById(itemName);
+                            if (builder != null) {
+                                item = builder.build();
+                            }
+                            if (item != null) {
                                 item.setAmount(amount);
+                            }
                         }
                     }
 
@@ -151,6 +220,16 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                                     }
                                     break;
                                 }
+                            }
+                        }
+                    }
+
+                    case "itemsadder" -> {
+                        if (hasItemsAdder && CustomStack.isInRegistry(itemName)) {
+                            CustomStack customStack = CustomStack.getInstance(itemName);
+                            if (customStack != null) {
+                                item = customStack.getItemStack();
+                                item.setAmount(amount);
                             }
                         }
                     }
@@ -182,11 +261,11 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        if (!sender.hasPermission("vcontainer.admin")) return Collections.emptyList();
+        if (!PermissionUtils.has(sender, "vcontainer.admin")) return Collections.emptyList();
         List<String> completions = new ArrayList<>();
 
         if (args.length == 1) {
-            for (String s : List.of("open", "clear", "reload", "give")) {
+            for (String s : List.of("open", "clear", "reload", "give", "give-block", "set")) {
                 if (s.startsWith(args[0].toLowerCase(Locale.ROOT)))
                     completions.add(s);
             }
@@ -198,6 +277,7 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                 if ("minecraft".startsWith(args[1].toLowerCase(Locale.ROOT))) completions.add("minecraft");
                 if (hasOraxen && "oraxen".startsWith(args[1].toLowerCase(Locale.ROOT))) completions.add("oraxen");
                 if (hasMythicMobs && "mythicmobs".startsWith(args[1].toLowerCase(Locale.ROOT))) completions.add("mythicmobs");
+                if (hasItemsAdder && "itemsadder".startsWith(args[1].toLowerCase(Locale.ROOT))) completions.add("itemsadder");
                 return completions;
             }
 
@@ -224,11 +304,21 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                     }
 
                     case "mythicmobs" -> {
-                        if (hasMythicMobs) {
+                        if (hasMythicMobs && MythicBukkit.inst() != null && MythicBukkit.inst().getItemManager() != null) {
                             completions.addAll(MythicBukkit.inst().getItemManager().getItems().stream()
                                     .map(MythicItem::getInternalName)
                                     .map(name -> name.toLowerCase(Locale.ROOT))
                                     .filter(name -> name.startsWith(partial))
+                                    .collect(Collectors.toList()));
+                        }
+                    }
+
+                    case "itemsadder" -> {
+                        if (hasItemsAdder) {
+                            completions.addAll(CustomStack.getNamespacedIdsInRegistry().stream()
+                                    .map(name -> name.toLowerCase(Locale.ROOT))
+                                    .filter(name -> name.startsWith(partial))
+                                    .limit(50)
                                     .collect(Collectors.toList()));
                         }
                     }
@@ -256,5 +346,53 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
         }
 
         return Collections.emptyList();
+    }
+
+    private GiveBlockArgs parseGiveBlockArgs(CommandSender sender, String[] args) {
+        Player receiver = null;
+        int amount = 1;
+        boolean silent = false;
+
+        for (int i = 1; i < args.length; i++) {
+            String arg = args[i];
+            if (arg.equalsIgnoreCase("-s")) {
+                silent = true;
+                continue;
+            }
+
+            try {
+                amount = Integer.parseInt(arg);
+                continue;
+            } catch (NumberFormatException ignored) {
+            }
+
+            receiver = Bukkit.getPlayerExact(arg);
+            if (receiver == null) {
+                sender.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString(
+                        "admin-command.player-not-found",
+                        "{prefix} The specific player not found! &8(&7{player}&8)"
+                ).replace("{player}", arg)));
+                return null;
+            }
+        }
+
+        if (receiver == null && sender instanceof Player player) {
+            receiver = player;
+        }
+
+        if (receiver == null) {
+            sender.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString("admin-command.need-a-player", "{prefix} Please enter a player!")));
+            return null;
+        }
+
+        if (amount <= 0) {
+            sender.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString("admin-command.invalid-amount", "{prefix} Invalid amount: {amount}").replace("{amount}", String.valueOf(amount))));
+            return null;
+        }
+
+        return new GiveBlockArgs(receiver, amount, silent);
+    }
+
+    private record GiveBlockArgs(Player receiver, int amount, boolean silent) {
     }
 }

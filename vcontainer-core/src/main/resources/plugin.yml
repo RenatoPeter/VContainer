@@ -6,6 +6,7 @@ author: MrVIRO
 softdepend:
   - Oraxen
   - MythicMobs
+  - ItemsAdder
 
 commands:
   container:
@@ -13,4 +14,24 @@ commands:
     usage: /container
   vcontainer:
     description: Admin container command
-    usage: /vcontainer <open|clear> <player>
+    usage: /vcontainer <open|clear|give|give-block|set|reload>
+
+permissions:
+  vcontainer.use:
+    description: Allows opening the personal container command
+    default: op
+  vcontainer.admin:
+    description: Allows using VContainer admin commands
+    default: op
+  vcontainer.admin.set:
+    description: Allows creating storage blocks with /vcontainer set
+    default: op
+  vcontainer.block.use:
+    description: Allows opening containers from storage blocks
+    default: op
+  vcontainer.block.remove:
+    description: Allows removing storage blocks by sneaking and breaking them
+    default: op
+  vcontainer.notify:
+    description: Allows receiving container item notifications
+    default: op

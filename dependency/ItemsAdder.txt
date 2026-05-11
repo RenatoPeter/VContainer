@@ -1,0 +1,299 @@
+To build your project against this library, simply include one of the following references in your pom.xml:
+
+ <repository>
+    <id>matteodev</id>
+    <url>https://maven.devs.beer/</url>
+</repository>
+In your <dependencies> section (To find the latest version check the badge above):
+
+<dependency>
+    <groupId>dev.lone</groupId>
+    <artifactId>api-itemsadder</artifactId>
+    <!-- Replace {version} with the latest version -->
+    <version>{version}</version>
+    <scope>provided</scope>
+</dependency>
+
+Usage
+Getting the API
+Logo
+GitHub - LoneDev6/API-ItemsAdder: This is the ItemsAdder API repository. It serves as a Maven/Gradle reference for anyone looking to access the API without embedding/owning the entire plugin.
+GitHub
+Important
+Listen to the ItemsAdderLoadDataEvent event in order to wait the plugin to load and detect /iareload or /iazip which can cause items and content to be changed (removed/added).
+
+Custom items - docs
+Getting a custom item of any type (block, item, hat, food etc.) by id or namespace:id
+
+Copy
+CustomStack stack = CustomStack.getInstance("your_item")
+if(stack != null)
+{
+    ItemStack itemStack = stack.getItemStack();
+}
+else
+{
+    //no custom item found with that id
+}
+Checking if a custom item exists
+
+Copy
+CustomStack.isInRegistry("your_item")
+Obtaining the CustomStack from a Bukkit ItemStack
+
+Copy
+CustomStack stack = CustomStack.byItemStack(myItemStack);
+
+if(stack != null) // It's a custom item!
+{
+    stack.setUsages(5) // For example set usages
+    // ...
+}
+else // It's not a custom item!
+{
+     // ...
+}
+Custom Blocks - docs
+Check if a custom block exists
+
+Copy
+CustomBlock.isInRegistry("your_item")
+Check if world block is a custom blocks
+
+Copy
+CustomBlock customBlock = CustomBlock.byAlreadyPlaced(block);
+if(customBlock != null)
+{
+    // Custom block, do your own stuff here
+}
+else
+{
+    // Not a custom block
+}
+Place custom block
+
+Copy
+CustomBlock customBlock = CustomBlock.getInstance("ruby_ore");
+if(customBlock != null) //not needed if you're sure the blocks exists.
+{
+    customBlock.place(location);
+}
+else
+{
+    // Custom block not found in ItemsAdder configurations!
+}
+Custom entity - docs
+Spawn a custom mob by id or namespace:id
+
+Copy
+CustomEntity customEntity = CustomEntity.spawn("your_item", location)
+if(customEntity != null)
+{
+    // Custom entity spawned
+    
+    // Example: print the namespaced id in console
+    System.out.println(customEntity.getNamespacedID());
+}
+else
+{
+    // Custom entity not found in ItemsAdder configurations!
+}
+Get custom entity by an already spawned Bukkit entity
+
+Copy
+CustomEntity customEntity = CustomEntity.byAlreadySpawned(entity)
+if(customEntity != null)
+{
+    // It's a custom entity
+    
+    // Example: print the namespaced id in console
+    System.out.println(customEntity.getNamespacedID());
+}
+else
+{
+    // This Bukkit entity is not a custom entity!
+}
+Liquids API
+Please also install IALiquids addon to have some test liquids
+
+
+Copy
+@EventHandler
+void interact(PlayerInteractEvent e)
+{
+    if(e.getAction() == Action.LEFT_CLICK_BLOCK)
+    {
+        ItemsAdder.setLiquid("ialiquids:red_water", e.getClickedBlock().getLocation());
+    }
+    else if(e.getAction() == Action.RIGHT_CLICK_BLOCK)
+    {
+        System.out.println(ItemsAdder.getLiquidName(e.getClickedBlock().getRelative(e.getBlockFace()).getLocation()));
+    }
+}
+Changing HUD values with API
+Setting a float value in a Frames Hud
+
+Copy
+PlayerHudsHolderWrapper playerHudsHolderWrapper = new PlayerHudsHolderWrapper(playerObject);
+PlayerQuantityHudWrapper hud = new PlayerQuantityHudWrapper(playerHudsHolderWrapper, "namespace_name:hud_name");
+hud.setFloatValue(1f);
+Making a HUD visible.
+
+Copy
+PlayerHudsHolderWrapper playerHudsHolderWrapper = new PlayerHudsHolderWrapper(playerObject);
+PlayerQuantityHudWrapper hud = new PlayerQuantityHudWrapper(playerHudsHolderWrapper, "namespace_name:hud_name");
+hud.setVisible(true);
+Old stuff:
+Custom mobs (old) - docs
+Spawn a custom mob by id or namespace:id
+
+Copy
+CustomMob customMob = CustomMob.spawn("your_item", location)
+if(customMob != null)
+{
+    //spawned the custom mob
+    
+    //example, print the display name in console
+    System.out.println(customMob.getName());
+}
+else
+{
+    //no custom mob found with that id
+}
+Get custom mob by mob already spawned in the world
+
+Copy
+CustomMob customMob = CustomMob.byAlreadySpawned(entity)
+if(customMob != null)
+{
+    //it's a custom mob
+    
+    //example, print the display name in console
+    System.out.println(customMob.getName());
+}
+else
+{
+    //this mob is not a custom mob
+}
+
+Events
+ItemsAdderLoadDataEvent
+
+Copy
+package dev.lone.itemsadder.api.Events;
+public class ItemsAdderLoadDataEvent extends Event
+This event is called when ItemsAdder has loaded all its stuff correctly (also on /iareload)
+Listen to this in order to wait all items, images etc. are available for your plugin.
+
+ResourcePackSendEvent - docs
+Event triggered when the server sends a resourcepack to the client.
+This event includes URL, hash and also contains info if it's an ItemsAdder resourcepack or another plugin resourcepack.
+
+Other events
+
+API Utilities
+API Utilities
+These are some static utilities to fast get some information.
+
+Note that these static utility methods are for lazy usage, you should use the other API classes instead.
+
+
+Copy
+// Check if itemsadder finished loading its items and if they are available
+// Normally you should use ItemsAdderFirstLoadEvent instead.
+// but sometimes you might also need to check this programmatically.
+public static boolean areItemsLoaded()
+
+//Checks if an item is a custom item made with ItemsAdder
+public static boolean isCustomItem(ItemStack itemStack)
+public static boolean isCustomItem(String customItemName)
+
+//returns the ItemStack of a custom block in world
+public static ItemStack getCustomBlock(Block block)
+
+//check if an entity in world is a furniture
+public static boolean isFurniture(Entity entity)
+
+//check if an ItemStack is a specific custom item 
+//(example: check if a pickaxe is 'amethyst_pickaxe')
+public static boolean matchCustomItemName(ItemStack itemStack, String customItemName)
+Old API methods
+This is the old API, it's still available and working fine.
+
+
+Copy
+//Get an ItemsAdder custom item by its name in config
+public static ItemStack getCustomItem(String nameInConfig)
+
+//Spawns a block made with ItemsAdder specifying the itemstack 
+//(obtain it with getCustomItem)
+public static void placeCustomBlock(Location location, ItemStack customBlock)
+public static void placeCustomBlock(Location location, ItemStack customBlock, boolean lightweight)
+
+//get custom block loots
+public static List<ItemStack> getCustomBlockLoot(Block block, ItemStack tool, boolean includeSelfBlock)
+
+//Check if a block in the world is a custom block made with ItemsAdder
+public static boolean isCustomBlock(Block block)
+
+//plants custom seed like a normal player would do
+public static void placeCustomCrop(Location location, ItemStack seed)
+
+//check if block is custom planted crop with custom seed
+public static boolean isCustomCrop(Block block)
+
+//get custom seed of custom crop
+public static String getCustomSeedNameFromCrop(Block block)
+
+//get name of the item in config (ex: 'ruby_pickaxe')
+public static String getCustomItemName(ItemStack itemStack)
+
+//get name of config where the item is declared (ex: 'items/swords')
+public static String getCustomItemFileName(ItemStack itemStack)
+
+//gets usages remaining of this item (-999 if it has no usages specified = infinite)
+public static int getCustomItemUsages(ItemStack itemStack)
+
+//set custom item durability (also works with vanilla items and with
+//custom items with default vanilla durability)
+public static ItemStack setCustomItemDurability(ItemStack item, int durability)
+
+//get custom durability
+public static int getCustomItemDurability(ItemStack itemStack)
+
+//get max custom durability 
+public static int getCustomItemMaxDurability(ItemStack itemStack)
+
+HUDs, GUIs, images and more
+To see how to use HUDs and GUIs API (Font Images) you can check my examples.
+
+GUIs
+Logo
+GitHub - LoneDev6/API-ItemsAdder-Example-GUI: Example usage of ItemsAdder API to crete custom textured inventories in Spigot
+GitHub
+Huds
+Logo
+GitHub - LoneDev6/RPGhuds: Customized HUDs for ItemsAdder
+GitHub
+Logo
+GitHub - LoneDev6/API-ItemsAdder-Example-ServerMonitor: Example usage of ItemsAdder API to create custom HUDs in Spigot
+GitHub
+Access mana bar value example
+
+Copy
+PlayerHudsHolderWrapper huds = new PlayerHudsHolderWrapper(player);
+PlayerQuantityHudWrapper manaHud = new PlayerQuantityHudWrapper(huds, "magiccraft:mana_bar");
+if(manaHud.exists())
+  manaHud.setFloatValue(2.0f);
+else
+  System.out.println("Error: mana not found, maybe it's disabled.");
+NOTE
+
+Make sure that you don't have the permission ia.user.hud.bypass.api.* or setFloatValue the code won't do anything.
+
+FAQ
+I can't see emoji, GUIs, HUDs etc.
+Get Emoji or GUI character
+
+Copy
+new FontImageWrapper("twitteremojis:confirm").getString();

@@ -38,27 +38,28 @@ public class ItemUtils {
     }
 
     public static String itemsToBase64(List<ItemStack> items) throws IOException {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        BukkitObjectOutputStream boos = new BukkitObjectOutputStream(baos);
-        boos.writeInt(items.size());
-        for (ItemStack item : items) {
-            boos.writeObject(item);
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
+             BukkitObjectOutputStream boos = new BukkitObjectOutputStream(baos)) {
+            boos.writeInt(items.size());
+            for (ItemStack item : items) {
+                boos.writeObject(item);
+            }
+            boos.flush();
+            return Base64.getEncoder().encodeToString(baos.toByteArray());
         }
-        boos.close();
-        return Base64.getEncoder().encodeToString(baos.toByteArray());
     }
 
     public static List<ItemStack> itemsFromBase64(String data) throws IOException, ClassNotFoundException {
         byte[] bytes = Base64.getDecoder().decode(data);
-        ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
-        BukkitObjectInputStream bois = new BukkitObjectInputStream(bais);
-        int size = bois.readInt();
-        List<ItemStack> items = new ArrayList<>();
-        for (int i = 0; i < size; i++) {
-            ItemStack item = (ItemStack) bois.readObject();
-            items.add(item);
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
+             BukkitObjectInputStream bois = new BukkitObjectInputStream(bais)) {
+            int size = bois.readInt();
+            List<ItemStack> items = new ArrayList<>();
+            for (int i = 0; i < size; i++) {
+                ItemStack item = (ItemStack) bois.readObject();
+                items.add(item);
+            }
+            return items;
         }
-        bois.close();
-        return items;
     }
 }

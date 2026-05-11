@@ -1,0 +1,17 @@
+title: "&0Storage Members"
+
+buttons:
+  player:
+    material: PLAYER_HEAD
+    name: "&f{player}"
+    member-lore:
+      - "&aAdded"
+      - "&7Click to remove"
+    not-member-lore:
+      - "&cNot added"
+      - "&7Click to add"
+  back:
+    material: ARROW
+    name: "&aBack"
+    lore:
+      - "&7Return to storage"

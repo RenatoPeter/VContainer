@@ -1,0 +1,29 @@
+title: "&0Container %current-page%/%max-page%"
+
+buttons:
+  prev:
+    material: ARROW
+    name: "&a<< Prev"
+    lore:
+      - "&7Previous Page"
+  next:
+    material: ARROW
+    name: "&aNext >>"
+    lore:
+      - "&7Next Page"
+  sort:
+    material: HOPPER
+    name: "&bSorting: &f{mode}"
+    lore:
+      - "&7Click to switch sorting mode"
+      - "&7Next: &f{next-mode}"
+  pickup:
+    material: BARRIER
+    name: "&cPick up storage block"
+    lore:
+      - "&7Returns this storage block item."
+  members:
+    material: PLAYER_HEAD
+    name: "&aStorage members"
+    lore:
+      - "&7Manage who can open this block."

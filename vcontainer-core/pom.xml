@@ -48,6 +48,11 @@
             <url>https://repo.oraxen.com/releases</url>
         </repository>
 
+        <repository>
+            <id>matteodev</id>
+            <url>https://maven.devs.beer/</url>
+        </repository>
+
     </repositories>
 
     <dependencies>
@@ -64,6 +69,12 @@
             <artifactId>paper-api</artifactId>
             <version>1.21.1-R0.1-SNAPSHOT</version>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>dev.triumphteam</groupId>
+            <artifactId>triumph-gui</artifactId>
+            <version>3.1.13</version>
         </dependency>
 
         <dependency>
@@ -126,6 +137,13 @@
             <scope>provided</scope>
         </dependency>
 
+        <dependency>
+            <groupId>dev.lone</groupId>
+            <artifactId>api-itemsadder</artifactId>
+            <version>4.0.10</version>
+            <scope>provided</scope>
+        </dependency>
+
     </dependencies>
 
     <build>
@@ -145,22 +163,22 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
-                <version>3.5.0</version> <!-- frissítve -->
+                <version>3.6.0</version>
+                <configuration>
+                    <relocations>
+                        <relocation>
+                            <pattern>dev.triumphteam.gui</pattern>
+                            <shadedPattern>hu.vzone.vcontainer.libs.gui</shadedPattern>
+                        </relocation>
+                    </relocations>
+                    <createDependencyReducedPom>false</createDependencyReducedPom>
+                </configuration>
                 <executions>
                     <execution>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
-                        <configuration>
-<!--                            <relocations>-->
-<!--                                <relocation>-->
-<!--                                    <pattern>hu.vzone.vcontainer.api</pattern>-->
-<!--                                    <shadedPattern>hu.vzone.vcontainer.internal.api</shadedPattern>-->
-<!--                                </relocation>-->
-<!--                            </relocations>-->
-                            <createDependencyReducedPom>false</createDependencyReducedPom>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>

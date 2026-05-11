@@ -3,6 +3,7 @@ package hu.vzone.vcontainer.commands;
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.managers.ContainerManager;
+import hu.vzone.vcontainer.utils.PermissionUtils;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -25,7 +26,7 @@ public class ContainerCommand implements CommandExecutor {
             sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.only-players-can-use", "{prefix} Only players can use this command!")));
             return true;
         }
-        if(!player.hasPermission("vcontainer.use")){
+        if(!PermissionUtils.has(player, "vcontainer.use")){
             sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.no-permission", "{prefix} You don't have any permission!")));
             return true;
         }
