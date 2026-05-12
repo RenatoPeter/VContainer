@@ -5,7 +5,7 @@ VContainer is a Paper Minecraft plugin that gives every player a persistent virt
 ## Requirements
 
 - Java 21
-- Paper 1.21.x
+- Paper compatible with one of the supported Minecraft versions listed below
 - Maven 3.x to build from source
 - Optional soft dependencies:
   - Oraxen
@@ -434,6 +434,24 @@ The API also includes `ContainerAddItemEvent`, fired before an item is added thr
 
 ## Compatibility Notes
 
+- `plugin.yml` uses `api-version: '1.21'`, which is the Bukkit/Paper API declaration for the 1.21 API family.
+- At runtime, VContainer logs whether the detected Minecraft version is in the supported version list.
+- Supported Minecraft versions:
+  - `1.21`
+  - `1.21.1`
+  - `1.21.2`
+  - `1.21.3`
+  - `1.21.4`
+  - `1.21.5`
+  - `1.21.6`
+  - `1.21.7`
+  - `1.21.8`
+  - `1.21.9`
+  - `1.21.10`
+  - `1.21.11`
+  - `26.1`
+  - `26.1.1`
+  - `26.1.2`
 - Oraxen, MythicMobs, and ItemsAdder are soft dependencies.
 - The plugin shades Triumph GUI and database libraries into the final jar.
 - SQL connection pooling uses HikariCP.

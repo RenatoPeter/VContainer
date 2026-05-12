@@ -10,6 +10,7 @@ import hu.vzone.vcontainer.listeners.ContainerListener;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.storage.StorageSettings;
+import hu.vzone.vcontainer.utils.ServerVersionSupport;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.configuration.InvalidConfigurationException;
@@ -51,6 +52,8 @@ public final class VContainer extends JavaPlugin {
         instance = this;
         gson = new GsonBuilder().serializeNulls().create();
 
+        logServerVersionSupport();
+
         saveDefaultConfig();
         updateDefaultConfig();
         createDatabaseConfig();
@@ -75,6 +78,17 @@ public final class VContainer extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, storageBlockManager), this);
 
         getLogger().info("VContainer v" + getDescription().getVersion() + " enabled successfully.");
+    }
+
+    private void logServerVersionSupport() {
+        String currentVersion = ServerVersionSupport.currentVersion();
+        if (ServerVersionSupport.isSupported()) {
+            getLogger().info("Detected supported Minecraft version: " + currentVersion);
+            return;
+        }
+
+        getLogger().warning("Detected unsupported Minecraft version: " + currentVersion);
+        getLogger().warning("Supported versions: " + ServerVersionSupport.supportedVersionsText());
     }
 
     @Override
