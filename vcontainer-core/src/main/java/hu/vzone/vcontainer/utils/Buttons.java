@@ -3,12 +3,9 @@ package hu.vzone.vcontainer.utils;
 import hu.vzone.vcontainer.VContainer;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
-import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Map;
 
 public class Buttons {
 
@@ -16,24 +13,7 @@ public class Buttons {
         ConfigurationSection section = VContainer.getInstance().getConfig().getConfigurationSection("buttons." + path);
         if (section == null) return new ItemStack(Material.BARRIER);
 
-        Material material = Material.matchMaterial(section.getString("material", "BARRIER"));
-        if (material == null) material = Material.BARRIER;
-
-        ItemStack item = new ItemStack(material);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(VContainer.formatMessage(section.getString("name", "&cUnnamed")));
-
-            List<String> loreFormatted = new ArrayList<>();
-            for (String line : section.getStringList("lore")) {
-                loreFormatted.add(VContainer.formatMessage(line));
-            }
-            meta.setLore(loreFormatted);
-
-            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
-            item.setItemMeta(meta);
-        }
-        return item;
+        return ConfigItemBuilder.build(VContainer.getInstance(), section, Material.BARRIER, Map.of());
     }
 
     public static int getButtonSlot(String path) {

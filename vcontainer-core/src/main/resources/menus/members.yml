@@ -19,32 +19,32 @@ items:
   member_entry:
     # Repeated player entry item.
     # The current GUI engine uses page-size for the amount of player slots.
-    material: PLAYER_HEAD
-    action: member-toggle
-    head_owner: "{player}"
-    slots:
+    Material: PLAYER_HEAD
+    Action: member-toggle
+    HeadOwner: "{player}"
+    Slots:
       - "0-44"
-    display_name: "&f{player}"
-    member_lore:
+    Name: "&f{player}"
+    MemberLore:
       - "&aAdded"
       - "&7Click to remove"
-    not_member_lore:
+    NotMemberLore:
       - "&cNot added"
       - "&7Click to add"
 
   filler:
     # Decorative filler item for the bottom control row.
-    material: BLACK_STAINED_GLASS_PANE
-    action: decoration
-    slots:
+    Material: BLACK_STAINED_GLASS_PANE
+    Action: decoration
+    Slots:
       - "45-53"
-    display_name: " "
+    Name: " "
 
   back:
     # Returns to the storage menu.
-    material: ARROW
-    action: back
-    slot: 49
-    display_name: "&aBack"
-    lore:
+    Material: ARROW
+    Action: back
+    Slot: 49
+    Name: "&aBack"
+    Lore:
       - "&7Return to storage"

@@ -24,64 +24,64 @@ items:
   stored_items:
     # Stored items are placed into the paginated content area.
     # The current GUI engine uses page-size for the amount of item slots.
-    action: container-item
-    slots:
+    Action: container-item
+    Slots:
       - "0-44"
 
   filler:
     # Decorative filler item for the bottom control row.
-    material: BLACK_STAINED_GLASS_PANE
-    action: decoration
-    slots:
+    Material: BLACK_STAINED_GLASS_PANE
+    Action: decoration
+    Slots:
       - "45-53"
-    display_name: " "
+    Name: " "
 
   pickup:
     # Personal storage block pickup button.
     # Only visible to the player who placed the personal storage block.
-    material: BARRIER
-    action: storage-pickup
-    slot: 45
-    display_name: "&cPick up storage block"
-    lore:
+    Material: BARRIER
+    Action: storage-pickup
+    Slot: 45
+    Name: "&cPick up storage block"
+    Lore:
       - "&7Returns this storage block item."
 
   previous_page:
     # Optional previous-page button.
-    material: ARROW
-    action: page-prev
-    slot: 48
-    display_name: "&a<< Prev"
-    lore:
+    Material: ARROW
+    Action: page-prev
+    Slot: 48
+    Name: "&a<< Prev"
+    Lore:
       - "&7Previous Page"
 
   sorting:
     # Cycles the viewer's personal sorting mode.
     # Placeholders: {mode}, {next-mode}
-    material: HOPPER
-    action: sort
-    slot: 49
-    display_name: "&bSorting: &f{mode}"
-    lore:
+    Material: HOPPER
+    Action: sort
+    Slot: 49
+    Name: "&bSorting: &f{mode}"
+    Lore:
       - "&7Click to switch sorting mode"
       - "&7Next: &f{next-mode}"
 
   next_page:
     # Optional next-page button.
-    material: ARROW
-    action: page-next
-    slot: 50
-    display_name: "&aNext >>"
-    lore:
+    Material: ARROW
+    Action: page-next
+    Slot: 50
+    Name: "&aNext >>"
+    Lore:
       - "&7Next Page"
 
   members:
     # Opens the member management menu.
     # Only visible to the player who placed the personal storage block.
-    material: PLAYER_HEAD
-    action: storage-members
-    head_owner: "{player}"
-    slot: 53
-    display_name: "&aStorage members"
-    lore:
+    Material: PLAYER_HEAD
+    Action: storage-members
+    HeadOwner: "{player}"
+    Slot: 53
+    Name: "&aStorage members"
+    Lore:
       - "&7Manage who can open this block."

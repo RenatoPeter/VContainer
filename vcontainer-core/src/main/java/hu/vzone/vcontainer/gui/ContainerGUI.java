@@ -10,6 +10,7 @@ import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageBlock;
+import hu.vzone.vcontainer.utils.ConfigItemBuilder;
 import hu.vzone.vcontainer.utils.ItemUtils;
 import hu.vzone.vcontainer.utils.PermissionUtils;
 import hu.vzone.vcontainer.utils.StorageBlockItem;
@@ -455,17 +456,18 @@ public class ContainerGUI {
 
     private static ItemStack createMemberButton(VContainer plugin, Player player, boolean member) {
         ConfigurationSection section = itemSection(plugin, "members", "member-toggle", "player");
-        Material material = Material.PLAYER_HEAD;
         String name = "&f{player}";
         List<String> loreRaw = member ? List.of("&aAdded", "&7Click to remove") : List.of("&cNot added", "&7Click to add");
         if (section != null) {
-            Material configured = Material.matchMaterial(section.getString("material", "PLAYER_HEAD"));
-            if (configured != null) material = configured;
-            name = section.getString("display_name", section.getString("name", name));
-            loreRaw = getStringList(section, member ? "member_lore" : "not_member_lore", member ? "member-lore" : "not-member-lore", loreRaw);
+            name = section.getString("Name", section.getString("display_name", section.getString("name", name)));
+            loreRaw = member
+                    ? getStringList(section, "MemberLore", "member_lore", loreRaw)
+                    : getStringList(section, "NotMemberLore", "not_member_lore", loreRaw);
         }
 
-        ItemStack item = new ItemStack(material);
+        ItemStack item = section == null
+                ? new ItemStack(Material.PLAYER_HEAD)
+                : ConfigItemBuilder.build(plugin, section, Material.PLAYER_HEAD, Map.of("player", player.getName(), "uuid", player.getUniqueId().toString()));
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             applyHeadOwner(meta, section, player);
@@ -482,18 +484,20 @@ public class ContainerGUI {
 
     private static ItemStack createSortButton(VContainer plugin, SortMode sortMode) {
         ConfigurationSection section = itemSection(plugin, "container", "sort", "sort");
-        Material material = Material.HOPPER;
         String name = "&bSorting: &f{mode}";
         List<String> loreRaw = List.of("&7Click to switch sorting mode", "&7Next: &f{next-mode}");
 
         if (section != null) {
-            Material configuredMaterial = Material.matchMaterial(section.getString("material", "HOPPER"));
-            if (configuredMaterial != null) material = configuredMaterial;
-            name = section.getString("display_name", section.getString("name", name));
-            loreRaw = section.getStringList("lore");
+            name = section.getString("Name", section.getString("display_name", section.getString("name", name)));
+            loreRaw = getStringList(section, "Lore", "lore", loreRaw);
         }
 
-        ItemStack item = new ItemStack(material);
+        ItemStack item = section == null
+                ? new ItemStack(Material.HOPPER)
+                : ConfigItemBuilder.build(plugin, section, Material.HOPPER, Map.of(
+                "mode", sortMode.displayName(),
+                "next-mode", sortMode.next().displayName()
+        ));
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             meta.setDisplayName(formatSortText(name, sortMode));
@@ -515,18 +519,20 @@ public class ContainerGUI {
 
     private static ItemStack createConfiguredButton(VContainer plugin, String menuName, String action, Player player) {
         ConfigurationSection section = itemSection(plugin, menuName, action, legacyButtonPath(action));
-        Material material = Material.BARRIER;
         String name = "&cButton";
         List<String> loreRaw = List.of();
 
         if (section != null) {
-            Material configured = Material.matchMaterial(section.getString("material", "BARRIER"));
-            if (configured != null) material = configured;
-            name = section.getString("display_name", section.getString("name", name));
-            loreRaw = section.getStringList("lore");
+            name = section.getString("Name", section.getString("display_name", section.getString("name", name)));
+            loreRaw = getStringList(section, "Lore", "lore", loreRaw);
         }
 
-        ItemStack item = new ItemStack(material);
+        Map<String, String> placeholders = player == null
+                ? Map.of()
+                : Map.of("player", player.getName(), "owner", player.getName(), "uuid", player.getUniqueId().toString());
+        ItemStack item = section == null
+                ? new ItemStack(Material.BARRIER)
+                : ConfigItemBuilder.build(plugin, section, Material.BARRIER, placeholders);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             applyHeadOwner(meta, section, player);
@@ -545,7 +551,7 @@ public class ContainerGUI {
     private static void applyHeadOwner(ItemMeta meta, ConfigurationSection section, Player player) {
         if (!(meta instanceof SkullMeta skullMeta)) return;
 
-        String ownerName = section == null ? "" : section.getString("head_owner", section.getString("skull-owner", ""));
+        String ownerName = section == null ? "" : getString(section, "HeadOwner", "head_owner", section.getString("skull-owner", ""));
         ownerName = replacePlayerPlaceholders(ownerName, player).trim();
         if (ownerName.isEmpty() && player != null) {
             ownerName = player.getName();
@@ -623,7 +629,7 @@ public class ContainerGUI {
 
         for (String key : items.getKeys(false)) {
             ConfigurationSection section = items.getConfigurationSection(key);
-            if (section == null || !"decoration".equalsIgnoreCase(section.getString("action", ""))) continue;
+            if (section == null || !"decoration".equalsIgnoreCase(getString(section, "Action", "action", ""))) continue;
 
             GuiItem item = ItemBuilder.from(createItem(section, createFiller())).asGuiItem(event -> event.setCancelled(true));
             for (int slot : itemSlots(section)) {
@@ -633,20 +639,7 @@ public class ContainerGUI {
     }
 
     private static ItemStack createItem(ConfigurationSection section, ItemStack fallback) {
-        Material material = Material.matchMaterial(section.getString("material", fallback.getType().name()));
-        ItemStack item = new ItemStack(material == null ? fallback.getType() : material);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.setDisplayName(VContainer.formatMessage(section.getString("display_name", section.getString("name", " "))));
-            List<String> lore = new ArrayList<>();
-            for (String line : section.getStringList("lore")) {
-                lore.add(VContainer.formatMessage(line));
-            }
-            meta.setLore(lore);
-            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
-            item.setItemMeta(meta);
-        }
-        return item;
+        return ConfigItemBuilder.build(VContainer.getInstance(), section, fallback.getType(), Map.of());
     }
 
     private static ConfigurationSection itemSection(VContainer plugin, String menuName, String action, String legacyPath) {
@@ -654,7 +647,7 @@ public class ContainerGUI {
         if (items != null) {
             for (String key : items.getKeys(false)) {
                 ConfigurationSection section = items.getConfigurationSection(key);
-                if (section != null && action.equalsIgnoreCase(section.getString("action", ""))) {
+                if (section != null && action.equalsIgnoreCase(getString(section, "Action", "action", ""))) {
                     return section;
                 }
             }
@@ -672,10 +665,11 @@ public class ContainerGUI {
 
     private static List<Integer> itemSlots(ConfigurationSection section) {
         Set<Integer> slots = new LinkedHashSet<>();
-        if (section.contains("slot")) {
-            slots.add(parseSlot(section.get("slot"), -1));
+        if (section.contains("Slot") || section.contains("slot")) {
+            slots.add(parseSlot(section.contains("Slot") ? section.get("Slot") : section.get("slot"), -1));
         }
-        for (Object raw : section.getList("slots", List.of())) {
+        List<?> rawSlots = section.contains("Slots") ? section.getList("Slots", List.of()) : section.getList("slots", List.of());
+        for (Object raw : rawSlots) {
             addSlotValue(slots, raw);
         }
         slots.remove(-1);
@@ -742,6 +736,11 @@ public class ContainerGUI {
         if (!values.isEmpty()) return values;
         values = section.getStringList(legacy);
         return values.isEmpty() ? fallback : values;
+    }
+
+    private static String getString(ConfigurationSection section, String primary, String legacy, String fallback) {
+        if (section.contains(primary)) return section.getString(primary, fallback);
+        return section.getString(legacy, fallback);
     }
 
     private static String legacyButtonPath(String action) {

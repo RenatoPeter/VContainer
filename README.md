@@ -28,6 +28,8 @@ VContainer is a Paper Minecraft plugin that gives every player a persistent virt
 - Holograms for global and personal storage blocks.
 - Local JSON, MySQL, MariaDB, and H2 storage backends.
 - Public API exposed through Bukkit `ServicesManager`.
+- Configurable item builder for GUI buttons and the personal storage block item.
+- Legacy colors, hex colors, Bukkit section hex colors, and MiniMessage gradients.
 
 ## Building
 
@@ -246,11 +248,23 @@ Storage block item and hologram settings:
 storage-block:
   set-target-distance: 6
   item:
-    material: SCULK_SHRIEKER
-    name: "&bPersonal Storage Block"
-    lore:
+    Material: SCULK_SHRIEKER
+    Name: "&bPersonal Storage Block"
+    Texture: ""
+    Lore:
       - "&7Place this block to create"
       - "&7your own linked storage."
+    Unbreakable: false
+    CustomModelData: -1
+    TooltipStyle: ""
+    MaxStackSize: -1
+    Glow: false
+    ItemFlags:
+      - HIDE_ATTRIBUTES
+      - HIDE_ENCHANTS
+      - HIDE_UNBREAKABLE
+    Enchantments: []
+    Attributes: []
   hologram:
     enabled: true
     height: 1.35
@@ -264,6 +278,85 @@ storage-block:
       - "&7Owner: &f{owner}"
       - "&7Right click to open"
       - "&8Hoppers can insert items"
+```
+
+### Config Item Format
+
+All configured plugin items use the same item format. This includes:
+
+- `storage-block.item` in `config.yml`
+- GUI items in `menus/container.yml`
+- GUI items in `menus/members.yml`
+
+Supported color formats in item names and lore:
+
+```text
+&bLegacy colors
+&#54DAF4Hex colors
+§x§5§4§D§A§F§4Bukkit section hex
+&x&5&4&D&A&F&4Ampersand hex
+<gradient:#54daf4:#545eb6>MiniMessage gradients</gradient>
+```
+
+Full item example:
+
+```yaml
+example_item:
+  Material: PLAYER_HEAD
+  Texture: "base64-texture-value"
+  Name: "<gradient:#54daf4:#545eb6>Example Item</gradient>"
+  Lore:
+    - "&7Normal lore line"
+    - "&#54DAF4Hex lore line"
+  Unbreakable: true
+  CustomModelData: 1001
+  TooltipStyle: "global:mythic"
+  MaxStackSize: 16
+  Glow: true
+  ItemFlags:
+    - HIDE_ATTRIBUTES
+    - HIDE_ENCHANTS
+    - HIDE_UNBREAKABLE
+  Enchantments:
+    - minecraft:sharpness:5
+    - unbreaking:3
+  Attributes:
+    - Attribute: GENERIC_ATTACK_DAMAGE
+      Amount: 4.0
+      Operation: ADD_NUMBER
+      Slot: MAINHAND
+      Key: vcontainer:example_attack_damage
+```
+
+Item keys:
+
+- `Material`: Bukkit material name, for example `PAPER`, `FEATHER`, `DIAMOND`, `PLAYER_HEAD`, or `SCULK_SHRIEKER`.
+- `Material: HDB-12345`: uses HeadDatabase if it is installed. If HeadDatabase is missing or the id cannot be loaded, the plugin falls back to `PLAYER_HEAD`.
+- `Name`: display name of the item.
+- `Texture`: optional base64 skull texture. Only works when the final item is `PLAYER_HEAD`.
+- `Lore`: list of lore lines.
+- `Unbreakable`: `true` or `false`.
+- `CustomModelData`: integer custom model data. Use `-1` to disable.
+- `TooltipStyle`: optional Minecraft 1.21.2+ tooltip style. Format: `namespace:path`. Invalid values are skipped with a console warning. Older server versions ignore this option.
+- `MaxStackSize`: optional item-specific max stack size. Use `-1` or omit it to disable.
+- `Glow`: `true` forces the enchantment glint, `false` disables the forced glint override.
+- `ItemFlags`: Bukkit `ItemFlag` names, for example `HIDE_ATTRIBUTES`, `HIDE_ENCHANTS`, `HIDE_UNBREAKABLE`, `HIDE_ADDITIONAL_TOOLTIP`.
+- `Enchantments`: list entries use `enchantment:level` or `namespace:enchantment:level`.
+- `Attributes`: list of attribute modifier objects.
+
+Attribute keys:
+
+- `Attribute`: Bukkit attribute enum, for example `GENERIC_ATTACK_DAMAGE`, `GENERIC_MAX_HEALTH`, or `GENERIC_MOVEMENT_SPEED`.
+- `Amount`: modifier amount.
+- `Operation`: Bukkit operation, usually `ADD_NUMBER`, `ADD_SCALAR`, or `MULTIPLY_SCALAR_1`.
+- `Slot`: optional equipment slot group. Common values: `ANY`, `MAINHAND`, `OFFHAND`, `HAND`, `FEET`, `LEGS`, `CHEST`, `HEAD`, `ARMOR`.
+- `Key`: optional unique namespaced modifier key. If omitted, VContainer generates one.
+
+Tooltip style resource pack paths:
+
+```text
+assets/<namespace>/textures/gui/sprites/tooltip/<path>_background.png
+assets/<namespace>/textures/gui/sprites/tooltip/<path>_frame.png
 ```
 
 ## Database And Storage

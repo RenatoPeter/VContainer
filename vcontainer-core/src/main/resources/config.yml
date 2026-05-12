@@ -114,14 +114,35 @@ storage-block:
 
   # Item given by /vcontainer give-block.
   item:
-    # Bukkit material used for the personal storage block item.
-    material: SCULK_SHRIEKER
+    # Bukkit material name, or HDB-12345 if HeadDatabase is installed.
+    Material: SCULK_SHRIEKER
     # Display name of the personal storage block item.
-    name: "&bPersonal Storage Block"
+    Name: "&bPersonal Storage Block"
+    # Optional base64 texture. Only works when Material is PLAYER_HEAD.
+    Texture: ""
     # Lore of the personal storage block item.
-    lore:
+    Lore:
       - "&7Place this block to create"
       - "&7your own linked storage."
+    # If true, the item cannot lose durability.
+    Unbreakable: false
+    # Set to -1 to disable custom model data.
+    CustomModelData: -1
+    # Optional 1.21.2+ tooltip style, format namespace:path.
+    TooltipStyle: ""
+    # Optional item-specific max stack size. Use -1 to disable.
+    MaxStackSize: -1
+    # If true, forces the enchantment glint without requiring enchantments.
+    Glow: false
+    # ItemFlag names to apply. Example: HIDE_ATTRIBUTES, HIDE_ENCHANTS.
+    ItemFlags:
+      - HIDE_ATTRIBUTES
+      - HIDE_ENCHANTS
+      - HIDE_UNBREAKABLE
+    # Enchantments to apply. Format: enchantment:level or namespace:enchantment:level.
+    Enchantments: []
+    # Attribute modifiers to apply to the item.
+    Attributes: []
 
   # Hopper integration for personal storage blocks.
   hoppers:

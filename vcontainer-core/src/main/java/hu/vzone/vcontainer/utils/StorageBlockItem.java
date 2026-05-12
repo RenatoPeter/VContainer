@@ -1,15 +1,14 @@
 package hu.vzone.vcontainer.utils;
 
 import hu.vzone.vcontainer.VContainer;
-import org.bukkit.Material;
 import org.bukkit.NamespacedKey;
-import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.persistence.PersistentDataType;
 
-import java.util.ArrayList;
-import java.util.List;
+import org.bukkit.Material;
+
+import java.util.Map;
 
 public final class StorageBlockItem {
     private static final String KEY_NAME = "storage_block_item";
@@ -18,20 +17,15 @@ public final class StorageBlockItem {
     }
 
     public static ItemStack build(VContainer plugin, int amount) {
-        Material material = Material.matchMaterial(plugin.getConfig().getString("storage-block.item.material", "SCULK_SHRIEKER"));
-        if (material == null || !material.isBlock()) material = Material.SCULK_SHRIEKER;
-
-        ItemStack item = new ItemStack(material, Math.max(1, amount));
+        ItemStack item = ConfigItemBuilder.build(
+                plugin,
+                plugin.getConfig().getConfigurationSection("storage-block.item"),
+                Material.SCULK_SHRIEKER,
+                Map.of()
+        );
+        item.setAmount(Math.max(1, amount));
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(VContainer.formatMessage(plugin.getConfig().getString("storage-block.item.name", "&bPersonal Storage Block")));
-
-            List<String> lore = new ArrayList<>();
-            for (String line : plugin.getConfig().getStringList("storage-block.item.lore")) {
-                lore.add(VContainer.formatMessage(line));
-            }
-            meta.setLore(lore);
-            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
             meta.getPersistentDataContainer().set(key(plugin), PersistentDataType.BYTE, (byte) 1);
             item.setItemMeta(meta);
         }
