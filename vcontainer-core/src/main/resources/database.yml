@@ -8,32 +8,47 @@
 # - MYSQL   = MySQL backend
 # - MARIADB = MariaDB backend
 # - H2      = embedded SQL backend
+#
+# Runtime behavior:
+# - Data is loaded when the plugin starts.
+# - Changes are kept in memory first.
+# - Data is flushed automatically every 2 minutes.
+# - Data is flushed again when the plugin shuts down.
 # ============================================================================
+
+# Internal config format version. Used for future automatic config upgrades.
 config-version: 1
 
+# Storage backend and connection settings.
 storage:
   # Active storage backend.
+  # LOCAL writes JSON files under plugins/VContainer/storage.
+  # MYSQL, MARIADB, and H2 write to SQL tables.
   Type: LOCAL
 
-  # Hostname or IP for MYSQL / MARIADB.
+  # Hostname or IP address for MYSQL and MARIADB.
+  # Ignored by LOCAL and ignored when Jdbc Url is set.
   Hostname: 172.168.0.1
 
-  # SQL port.
+  # SQL port for MYSQL and MARIADB.
+  # Common default: 3306.
   Port: 3306
 
-  # SQL username.
+  # SQL username used by MYSQL and MARIADB.
   Username: minecraft
 
-  # SQL password.
+  # SQL password used by MYSQL and MARIADB.
   Password: ""
 
-  # Database name / schema.
+  # Database name or schema used by MYSQL and MARIADB.
   Database: minecraft
 
-  # HikariCP maximum pool size.
+  # HikariCP maximum connection pool size.
+  # Higher values can help busy servers, but each connection costs database resources.
   Pool Size: 5
 
-  # SSL toggle for generated SQL URLs.
+  # Adds SSL options to generated MYSQL and MARIADB JDBC URLs.
+  # Ignored when Jdbc Url is set.
   Use SSL: false
 
   # Optional full JDBC URL override.
@@ -41,7 +56,10 @@ storage:
   Jdbc Url: ""
 
   # Optional explicit JDBC driver class override.
+  # Leave empty to use the default driver for the selected storage Type.
   Driver Class: ""
 
   # Prefix added before every VContainer SQL table name.
+  # The plugin creates separate tables for player_data, global_storage_blocks,
+  # and personal_storage_blocks.
   Prefix: vcontainer_

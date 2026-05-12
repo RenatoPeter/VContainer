@@ -1,17 +1,48 @@
+# ============================================================================
+# VContainer members GUI
+# ----------------------------------------------------------------------------
+# Opened from a personal storage block by its owner.
+#
+# Important action keys:
+# - member-toggle = one repeated entry per online player
+# - decoration    = static filler/decorative item
+# - back          = return to the storage menu
+# ============================================================================
+gui-version: 2
 title: "&0Storage Members"
+rows: 6
+page-size: 45
 
-buttons:
-  player:
+items:
+  member_entry:
+    # Repeated player entry item.
+    # The current GUI engine uses page-size for the amount of player slots.
     material: PLAYER_HEAD
-    name: "&f{player}"
-    member-lore:
+    action: member-toggle
+    head_owner: "{player}"
+    slots:
+      - "0-44"
+    display_name: "&f{player}"
+    member_lore:
       - "&aAdded"
       - "&7Click to remove"
-    not-member-lore:
+    not_member_lore:
       - "&cNot added"
       - "&7Click to add"
+
+  filler:
+    # Decorative filler item for the bottom control row.
+    material: BLACK_STAINED_GLASS_PANE
+    action: decoration
+    slots:
+      - "45-53"
+    display_name: " "
+
   back:
+    # Returns to the storage menu.
     material: ARROW
-    name: "&aBack"
+    action: back
+    slot: 49
+    display_name: "&aBack"
     lore:
       - "&7Return to storage"

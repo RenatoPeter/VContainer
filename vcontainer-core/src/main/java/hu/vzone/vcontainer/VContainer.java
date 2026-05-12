@@ -60,7 +60,7 @@ public final class VContainer extends JavaPlugin {
         createMessageConfig();
         createMenuConfigs();
 
-        playerDataFolder = new File(getStorageFolder(), getConfig().getString("player-data-folder", "player_data"));
+        playerDataFolder = new File(getStorageFolder(), "player_data");
         if (isLocalStorageBackend() && !playerDataFolder.exists() && !playerDataFolder.mkdirs()) {
             getLogger().warning("Could not create player data folder: " + playerDataFolder.getAbsolutePath());
         }
@@ -158,6 +158,8 @@ public final class VContainer extends JavaPlugin {
     private void updateDefaultConfig() {
         getConfig().options().copyDefaults(true);
         getConfig().set("container-options.sorting", null);
+        getConfig().set("buttons", null);
+        getConfig().set("player-data-folder", null);
         saveConfig();
     }
 

@@ -1,69 +1,94 @@
-# VContainer config
-# title supports placeholders: %current-page% and %max-page%
+# ============================================================================
+# VContainer main configuration
+# ----------------------------------------------------------------------------
+# This file controls the player container behavior, menu defaults, storage block
+# placement rules, hopper integration, holograms, and item stacking.
+#
+# Text values support legacy color codes with '&'. Some messages and titles also
+# support plugin-specific placeholders documented next to the setting.
+# ============================================================================
+
+# Main container menu title.
+# Placeholders: %current-page%, %max-page%
 title: "&0Container %current-page%/%max-page%"
 
-# Content slots (list of slot indices where items will be shown). If omitted will use default 0-44.
+# Slots where stored items are displayed in the menu.
+# Leave empty to use the default item area: slots 0-44.
 content-slots: []
 
-# Control buttons config
-buttons:
-  prev:
-    material: ARROW
-    name: "&a<< Prev"
-    lore:
-      - "&7Previous Page"
-    slot: 45+3
-  next:
-    material: ARROW
-    name: "&aNext >>"
-    lore:
-      - "&7Next Page"
-    slot: 45+5
-  sort:
-    material: HOPPER
-    name: "&bSorting: &f{mode}"
-    lore:
-      - "&7Click to switch sorting mode"
-      - "&7Next: &f{next-mode}"
-    slot: 45+4
-
+# Player interaction rules inside containers.
 container-options:
-  # If true, players can put items from their own inventory into the container while it is open.
+  # If true, players can put items from their own inventory into the container.
   allow-deposit: true
 
   # If true, players can take items out of the container.
   allow-withdraw: true
 
+  # Toggle deposit and withdraw chat messages.
   messages:
+    # Sends a message after manual item deposit.
     deposit: true
+    # Sends a message after manual item withdrawal.
     withdraw: true
 
+  # Shift-click bulk transfer settings.
   shift-transfer:
-    # If true, shift-clicking an item in the player's inventory deposits every configured inventory item.
+    # If true, shift-clicking a player inventory item deposits all matching
+    # configured inventory contents.
     deposit-all: true
 
-    # If true, shift-clicking a container item withdraws as many matching items as can fit.
+    # If true, shift-clicking a container item withdraws as many items as the
+    # player's inventory can fit.
     withdraw-fit: true
 
-    # These are false by default so equipped items stay untouched.
+    # If true, armor slots are included in shift deposit-all.
     include-armor: false
+
+    # If true, the offhand slot is included in shift deposit-all.
     include-offhand: false
 
-  # If true, equal items are shown as one icon with the total amount in lore.
+  # Compact display merges equal stored items visually into one icon.
+  # This does not remove the stored item data; it only changes how the GUI shows it.
   compact-display:
+    # Enables or disables compact display mode.
     enabled: false
+
+    # Total item amount lore line.
     size:
+      # If true, the size line can be inserted into the compact lore format.
       enable: true
+      # Lore text. Placeholder: {amount}
       line: "&7Item stack size: &f{amount}"
+
+    # Left-click withdraw-all lore line.
     withdraw-all:
+      # If true, the withdraw-all line can be inserted into the compact lore format.
       enable: true
+      # Lore text shown for withdrawing every matching item.
       line: "&eLeft click to withdraw all"
+
+    # Right-click withdraw-one lore line.
     withdraw:
+      # If true, the withdraw-one line can be inserted into the compact lore format.
       enable: true
+      # Lore text shown for withdrawing one item.
       line: "&eRight click to withdraw 1"
+
+    # Middle-click withdraw-stack lore line.
     withdraw-stack:
+      # If true, the withdraw-stack line can be inserted into the compact lore format.
       enable: true
+      # Lore text shown for withdrawing one normal Minecraft stack.
       line: "&eMiddle click to withdraw 1 stack"
+
+    # Lore layout used for compact items.
+    # Empty strings create blank lore lines.
+    # Placeholders:
+    # - %amount-line%
+    # - %withdraw-all-line%
+    # - %withdraw-one-line%
+    # - %withdraw-stack-line%
+    # Disabled sections are skipped automatically.
     format:
       - ""
       - "&8----------"
@@ -73,36 +98,55 @@ container-options:
       - "%withdraw-stack-line%"
       - "&8----------"
 
+# Global and personal storage block settings.
 storage-block:
-  # How far /vcontainer set can look for a target block.
+  # Maximum distance /vcontainer set can scan for the block the admin is looking at.
   set-target-distance: 6
 
+  # Personal storage block placement rules.
   personal:
     # Maximum personal storage blocks one player can place in the same chunk.
-    # Set to 0 to prevent non-bypassed players from placing personal storage blocks.
+    # Set to 0 to prevent placement unless the player has the bypass permission.
     chunk-limit: 4
 
+  # Item given by /vcontainer give-block.
   item:
+    # Bukkit material used for the personal storage block item.
     material: SCULK_SHRIEKER
+    # Display name of the personal storage block item.
     name: "&bPersonal Storage Block"
+    # Lore of the personal storage block item.
     lore:
       - "&7Place this block to create"
       - "&7your own linked storage."
 
+  # Hopper integration for personal storage blocks.
   hoppers:
+    # Master toggle for all hopper support.
     enabled: true
+    # If true, hoppers can insert items into personal storage blocks.
     input: true
+    # If true, hoppers can extract items from personal storage blocks.
     output: true
+    # How often hopper transfers are processed, in server ticks.
     interval-ticks: 8
 
+  # Text display hologram settings for storage blocks.
   hologram:
+    # Enables or disables storage block holograms.
     enabled: true
+    # Vertical offset above the block.
     height: 1.35
+    # If true, the text can be seen through blocks.
     see-through: false
+    # If true, Minecraft renders text shadow.
     shadow: true
+    # Hologram lines for /vcontainer set global storage blocks.
     lines:
       - "&bVContainer"
       - "&7Right click to open"
+    # Hologram lines for player-placed personal storage blocks.
+    # Placeholders: {owner}
     personal-lines:
       - "&bPersonal VContainer"
       - "&7Owner: &f{owner}"
@@ -113,8 +157,5 @@ storage-block:
 # If false, items added at different times stay as separate entries.
 stack: true
 
-# Maximum stack size used when stack is enabled.
+# Maximum stack size used while adding items when stack is enabled.
 max-stack: 64
-
-# Player data folder is player_data by default.
-player-data-folder: player_data

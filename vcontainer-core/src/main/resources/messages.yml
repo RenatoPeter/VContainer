@@ -1,16 +1,34 @@
-prefix: "&#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8»&f"
+# ============================================================================
+# VContainer messages
+# ----------------------------------------------------------------------------
+# Text values support legacy color codes with '&' and hex colors like &#1898FF.
+# The {prefix} placeholder inserts the prefix configured below.
+# ============================================================================
 
+# Prefix inserted into messages that use the {prefix} placeholder.
+prefix: "&#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8>&f"
+
+# Messages used while players interact with containers.
 container:
+  # Sent after items are deposited into a container. Placeholders: {amount}, {item}
   deposit: "{prefix} You put {amount} of {item} into the container."
+  # Sent after items are withdrawn from a container. Placeholders: {amount}, {item}
   take: "{prefix} You took {amount} of {item} out of the container."
+  # Sent when a withdraw action cannot fit into the player's inventory.
   inventory-full: "{prefix} Your inventory is full."
 
+# General player command messages.
 command:
+  # Sent when console runs a player-only command.
   only-players-can-use: "{prefix} Only players can use this command!"
-  no-permission: "{prefix} You don't have any permission!" #vcontainer.use
+  # Sent when a player lacks the base permission. Permission: vcontainer.use
+  no-permission: "{prefix} You don't have any permission!"
 
+# Admin command messages.
 admin-command:
-  no-permission: "{prefix} You don't have any permission!" #vcontainer.admin
+  # Sent when a player lacks admin permission. Permission: vcontainer.admin
+  no-permission: "{prefix} You don't have any permission!"
+  # Help text shown for /vcontainer and invalid admin command usage.
   usage:
     - "&8&m<---======[&r &#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8&m]======--->"
     - "&f/vcontainer open <player> &8- &7Open a specific player container"
@@ -19,27 +37,52 @@ admin-command:
     - "&f/vcontainer give-block [player] [amount] -s &8- &7Give personal storage block item"
     - "&f/vcontainer set &8- &7Create a storage block from the block you are looking at"
     - "&f/vcontainer reload &8- &7Reload the plugin"
+  # Sent after the plugin reloads successfully.
   reload: "{prefix} Plugin successfully reloaded!"
+  # Sent when a command target player cannot be found. Placeholder: {player}
   player-not-found: "{prefix} The specific player not found! &8(&7{player}&8)"
+  # Sent when an admin opens another player's container. Placeholder: {player}
   open: "{prefix} You opened {player}'s container!"
+  # Sent when an admin clears another player's container. Placeholder: {player}
   clear: "{prefix} You cleared {player}'s container!"
+  # Sent when an amount argument is not a valid positive number. Placeholder: {amount}
   invalid-amount: "{prefix} Invalid amount: {amount}"
+  # Sent when a command requires a player argument.
   need-a-player: "{prefix} Please enter a player!"
+  # Sent when /vcontainer give uses an unknown source. Placeholder: {source}
   unknown-source: "{prefix} Unknown source: {source}"
+  # Sent when a requested item id cannot be resolved. Placeholder: {item}
   item-not-found: "{prefix} The specified item was not found. &8(&7{item}&8)"
-  add-to-container: "{prefix} {amount} of {item} items added to {player}'s container." #Permission: vcontainer.notify
+  # Sent to notify allowed staff after items are added. Permission: vcontainer.notify
+  # Placeholders: {amount}, {item}, {player}
+  add-to-container: "{prefix} {amount} of {item} items added to {player}'s container."
+  # Sent when the admin command action is unknown. Placeholder: {action}
   unknown-action: "{prefix} Unknown action: {action}"
+  # Sent to the sender after giving personal storage block items. Placeholders: {amount}, {player}
   give-block: "{prefix} You gave {amount} storage block item(s) to {player}."
 
+# Storage block placement, access, and protection messages.
 storage-block:
+  # Sent to the receiver of /vcontainer give-block unless -s is used. Placeholder: {amount}
   received: "{prefix} You received {amount} storage block item(s)."
+  # Sent when /vcontainer set creates a global storage block.
   set: "{prefix} Storage block created."
+  # Sent when the target block is already registered as a storage block.
   already-set: "{prefix} This block is already a storage block."
+  # Sent when /vcontainer set cannot find a target block.
   no-target: "{prefix} Look at a block first."
+  # Sent when a global storage block is removed by shift-breaking it.
   removed: "{prefix} Storage block removed."
+  # Sent when a protected storage block cannot be broken.
   protected: "{prefix} This storage block is protected."
+  # Sent when a player lacks storage block use permission.
   no-use-permission: "{prefix} You don't have permission to use this storage block."
+  # Sent when a player is not added to a personal storage block.
   no-access: "{prefix} You are not added to this storage block."
+  # Sent when a personal storage block is placed.
   placed: "{prefix} Personal storage block placed."
+  # Sent when a personal storage block is picked up through its owner menu button.
   picked-up: "{prefix} Personal storage block picked up."
+  # Sent when the per-player chunk limit prevents placing another personal block.
+  # Placeholder: {limit}
   chunk-limit: "{prefix} You can only place {limit} personal storage blocks in this chunk."

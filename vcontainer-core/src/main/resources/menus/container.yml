@@ -1,29 +1,85 @@
+# ============================================================================
+# VContainer container GUI
+# ----------------------------------------------------------------------------
+# Opened by /container, admin container views, global storage blocks, and
+# personal storage blocks.
+#
+# Important action keys:
+# - container-item   = stored item paging area size
+# - decoration       = static filler/decorative item
+# - page-prev        = previous-page button
+# - page-next        = next-page button
+# - sort             = per-player sorting button
+# - storage-pickup   = personal storage pickup button, owner only
+# - storage-members  = personal storage member menu button, owner only
+# ============================================================================
+gui-version: 2
 title: "&0Container %current-page%/%max-page%"
+rows: 6
+page-size: 45
 
-buttons:
-  prev:
+items:
+  stored_items:
+    # Stored items are placed into the paginated content area.
+    # The current GUI engine uses page-size for the amount of item slots.
+    action: container-item
+    slots:
+      - "0-44"
+
+  filler:
+    # Decorative filler item for the bottom control row.
+    material: BLACK_STAINED_GLASS_PANE
+    action: decoration
+    slots:
+      - "45-53"
+    display_name: " "
+
+  pickup:
+    # Personal storage block pickup button.
+    # Only visible to the player who placed the personal storage block.
+    material: BARRIER
+    action: storage-pickup
+    slot: 45
+    display_name: "&cPick up storage block"
+    lore:
+      - "&7Returns this storage block item."
+
+  previous_page:
+    # Optional previous-page button.
     material: ARROW
-    name: "&a<< Prev"
+    action: page-prev
+    slot: 48
+    display_name: "&a<< Prev"
     lore:
       - "&7Previous Page"
-  next:
-    material: ARROW
-    name: "&aNext >>"
-    lore:
-      - "&7Next Page"
-  sort:
+
+  sorting:
+    # Cycles the viewer's personal sorting mode.
+    # Placeholders: {mode}, {next-mode}
     material: HOPPER
-    name: "&bSorting: &f{mode}"
+    action: sort
+    slot: 49
+    display_name: "&bSorting: &f{mode}"
     lore:
       - "&7Click to switch sorting mode"
       - "&7Next: &f{next-mode}"
-  pickup:
-    material: BARRIER
-    name: "&cPick up storage block"
+
+  next_page:
+    # Optional next-page button.
+    material: ARROW
+    action: page-next
+    slot: 50
+    display_name: "&aNext >>"
     lore:
-      - "&7Returns this storage block item."
+      - "&7Next Page"
+
   members:
+    # Opens the member management menu.
+    # Only visible to the player who placed the personal storage block.
     material: PLAYER_HEAD
-    name: "&aStorage members"
+    action: storage-members
+    head_owner: "{player}"
+    slot: 53
+    display_name: "&aStorage members"
     lore:
       - "&7Manage who can open this block."

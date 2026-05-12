@@ -1,5 +1,7 @@
 package hu.vzone.vcontainer.gui;
 
+import com.destroystokyo.paper.profile.PlayerProfile;
+import com.destroystokyo.paper.profile.ProfileProperty;
 import dev.triumphteam.gui.builder.item.ItemBuilder;
 import dev.triumphteam.gui.guis.Gui;
 import dev.triumphteam.gui.guis.GuiItem;
@@ -17,6 +19,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
 import org.bukkit.inventory.Inventory;
@@ -24,11 +27,14 @@ import org.bukkit.inventory.ItemFlag;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
+import org.bukkit.inventory.meta.SkullMeta;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -93,13 +99,15 @@ public class ContainerGUI {
         List<DisplayEntry> items = getDisplayEntries(containerItems, compactDisplay);
         SortMode sortMode = SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE);
         sortEntries(items, sortMode);
-        int maxPage = Math.max(1, (int) Math.ceil((double) items.size() / PAGE_SIZE));
+        int rows = menuRows(plugin, "container", ROWS);
+        int pageSize = menuPageSize(plugin, "container", PAGE_SIZE);
+        int maxPage = Math.max(1, (int) Math.ceil((double) items.size() / pageSize));
         int targetPage = Math.max(1, Math.min(page, maxPage));
 
         PaginatedGui gui = Gui.paginated()
                 .title(title(plugin, targetPage, maxPage))
-                .rows(ROWS)
-                .pageSize(PAGE_SIZE)
+                .rows(rows)
+                .pageSize(pageSize)
                 .create();
 
         registerOpenView(gui, viewer, ownerId, ownerName, manager, targetPage, storageBlockManager, storageKey);
@@ -140,14 +148,11 @@ public class ContainerGUI {
             Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
         });
 
-        GuiItem filler = ItemBuilder.from(createFiller()).asGuiItem(event -> event.setCancelled(true));
-        for (int slot = 45; slot < 54; slot++) {
-            gui.setItem(slot, filler);
-        }
+        applyStaticItems(gui, plugin, "container");
 
         addStorageOwnerButtons(gui, plugin, viewer, ownerId, ownerName, manager, storageBlockManager, storageKey);
 
-        gui.setItem(SORT_SLOT, ItemBuilder.from(createSortButton(plugin, sortMode)).asGuiItem(event -> {
+        gui.setItem(itemSlot(plugin, "container", "sort", SORT_SLOT), ItemBuilder.from(createSortButton(plugin, sortMode)).asGuiItem(event -> {
             event.setCancelled(true);
             if (event.getWhoClicked() instanceof Player player) {
                 SORT_MODES.put(player.getUniqueId(), sortMode.next());
@@ -156,7 +161,7 @@ public class ContainerGUI {
         }));
 
         if (targetPage > 1) {
-            gui.setItem(PREVIOUS_SLOT, ItemBuilder.from(createConfiguredButton(plugin, "container", "prev")).asGuiItem(event -> {
+            gui.setItem(itemSlot(plugin, "container", "page-prev", PREVIOUS_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "page-prev")).asGuiItem(event -> {
                 event.setCancelled(true);
                 if (event.getWhoClicked() instanceof Player player) {
                     openContainer(player, ownerId, ownerName, manager, targetPage - 1, storageBlockManager, storageKey);
@@ -165,7 +170,7 @@ public class ContainerGUI {
         }
 
         if (targetPage < maxPage) {
-            gui.setItem(NEXT_SLOT, ItemBuilder.from(createConfiguredButton(plugin, "container", "next")).asGuiItem(event -> {
+            gui.setItem(itemSlot(plugin, "container", "page-next", NEXT_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "page-next")).asGuiItem(event -> {
                 event.setCancelled(true);
                 if (event.getWhoClicked() instanceof Player player) {
                     openContainer(player, ownerId, ownerName, manager, targetPage + 1, storageBlockManager, storageKey);
@@ -396,7 +401,7 @@ public class ContainerGUI {
         StorageBlock storageBlock = storageBlockManager.get(storageKey);
         if (!storageBlockManager.isOwner(viewer, storageBlock)) return;
 
-        gui.setItem(PICKUP_SLOT, ItemBuilder.from(createConfiguredButton(plugin, "container", "pickup")).asGuiItem(event -> {
+        gui.setItem(itemSlot(plugin, "container", "storage-pickup", PICKUP_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "storage-pickup", viewer)).asGuiItem(event -> {
             event.setCancelled(true);
             if (!(event.getWhoClicked() instanceof Player player)) return;
             if (!storageBlockManager.isOwner(player, storageBlockManager.get(storageKey))) return;
@@ -409,7 +414,7 @@ public class ContainerGUI {
             player.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString("storage-block.picked-up", "{prefix} Personal storage block picked up.")));
         }));
 
-        gui.setItem(MEMBERS_SLOT, ItemBuilder.from(createConfiguredButton(plugin, "container", "members")).asGuiItem(event -> {
+        gui.setItem(itemSlot(plugin, "container", "storage-members", MEMBERS_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "storage-members", viewer)).asGuiItem(event -> {
             event.setCancelled(true);
             if (event.getWhoClicked() instanceof Player player) {
                 openMembersMenu(player, ownerId, ownerName, manager, storageBlockManager, storageKey);
@@ -424,10 +429,11 @@ public class ContainerGUI {
 
         PaginatedGui gui = Gui.paginated()
                 .title(LEGACY.deserialize(VContainer.formatMessage(menu(plugin, "members").getString("title", "&0Storage Members"))))
-                .rows(6)
-                .pageSize(45)
+                .rows(menuRows(plugin, "members", ROWS))
+                .pageSize(menuPageSize(plugin, "members", PAGE_SIZE))
                 .create();
         gui.setDefaultClickAction(event -> event.setCancelled(true));
+        applyStaticItems(gui, plugin, "members");
 
         for (Player target : Bukkit.getOnlinePlayers()) {
             if (target.getUniqueId().equals(ownerId)) continue;
@@ -438,7 +444,7 @@ public class ContainerGUI {
             }));
         }
 
-        gui.setItem(SORT_SLOT, ItemBuilder.from(createConfiguredButton(plugin, "members", "back")).asGuiItem(event -> {
+        gui.setItem(itemSlot(plugin, "members", "back", SORT_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "members", "back")).asGuiItem(event -> {
             event.setCancelled(true);
             if (event.getWhoClicked() instanceof Player player) {
                 openContainer(player, ownerId, ownerName, manager, 1, storageBlockManager, storageKey);
@@ -448,20 +454,21 @@ public class ContainerGUI {
     }
 
     private static ItemStack createMemberButton(VContainer plugin, Player player, boolean member) {
-        ConfigurationSection section = menu(plugin, "members").getConfigurationSection("buttons.player");
+        ConfigurationSection section = itemSection(plugin, "members", "member-toggle", "player");
         Material material = Material.PLAYER_HEAD;
         String name = "&f{player}";
         List<String> loreRaw = member ? List.of("&aAdded", "&7Click to remove") : List.of("&cNot added", "&7Click to add");
         if (section != null) {
             Material configured = Material.matchMaterial(section.getString("material", "PLAYER_HEAD"));
             if (configured != null) material = configured;
-            name = section.getString("name", name);
-            loreRaw = section.getStringList(member ? "member-lore" : "not-member-lore");
+            name = section.getString("display_name", section.getString("name", name));
+            loreRaw = getStringList(section, member ? "member_lore" : "not_member_lore", member ? "member-lore" : "not-member-lore", loreRaw);
         }
 
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
+            applyHeadOwner(meta, section, player);
             meta.setDisplayName(VContainer.formatMessage(name.replace("{player}", player.getName())));
             List<String> lore = new ArrayList<>();
             for (String line : loreRaw) {
@@ -474,7 +481,7 @@ public class ContainerGUI {
     }
 
     private static ItemStack createSortButton(VContainer plugin, SortMode sortMode) {
-        ConfigurationSection section = menu(plugin, "container").getConfigurationSection("buttons.sort");
+        ConfigurationSection section = itemSection(plugin, "container", "sort", "sort");
         Material material = Material.HOPPER;
         String name = "&bSorting: &f{mode}";
         List<String> loreRaw = List.of("&7Click to switch sorting mode", "&7Next: &f{next-mode}");
@@ -482,7 +489,7 @@ public class ContainerGUI {
         if (section != null) {
             Material configuredMaterial = Material.matchMaterial(section.getString("material", "HOPPER"));
             if (configuredMaterial != null) material = configuredMaterial;
-            name = section.getString("name", name);
+            name = section.getString("display_name", section.getString("name", name));
             loreRaw = section.getStringList("lore");
         }
 
@@ -502,8 +509,12 @@ public class ContainerGUI {
         return item;
     }
 
-    private static ItemStack createConfiguredButton(VContainer plugin, String menuName, String path) {
-        ConfigurationSection section = menu(plugin, menuName).getConfigurationSection("buttons." + path);
+    private static ItemStack createConfiguredButton(VContainer plugin, String menuName, String action) {
+        return createConfiguredButton(plugin, menuName, action, null);
+    }
+
+    private static ItemStack createConfiguredButton(VContainer plugin, String menuName, String action, Player player) {
+        ConfigurationSection section = itemSection(plugin, menuName, action, legacyButtonPath(action));
         Material material = Material.BARRIER;
         String name = "&cButton";
         List<String> loreRaw = List.of();
@@ -511,16 +522,124 @@ public class ContainerGUI {
         if (section != null) {
             Material configured = Material.matchMaterial(section.getString("material", "BARRIER"));
             if (configured != null) material = configured;
-            name = section.getString("name", name);
+            name = section.getString("display_name", section.getString("name", name));
             loreRaw = section.getStringList("lore");
         }
 
         ItemStack item = new ItemStack(material);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
-            meta.setDisplayName(VContainer.formatMessage(name));
+            applyHeadOwner(meta, section, player);
+            meta.setDisplayName(VContainer.formatMessage(replacePlayerPlaceholders(name, player)));
             List<String> lore = new ArrayList<>();
             for (String line : loreRaw) {
+                lore.add(VContainer.formatMessage(replacePlayerPlaceholders(line, player)));
+            }
+            meta.setLore(lore);
+            meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
+            item.setItemMeta(meta);
+        }
+        return item;
+    }
+
+    private static void applyHeadOwner(ItemMeta meta, ConfigurationSection section, Player player) {
+        if (!(meta instanceof SkullMeta skullMeta)) return;
+
+        String ownerName = section == null ? "" : section.getString("head_owner", section.getString("skull-owner", ""));
+        ownerName = replacePlayerPlaceholders(ownerName, player).trim();
+        if (ownerName.isEmpty() && player != null) {
+            ownerName = player.getName();
+        }
+        if (ownerName.isEmpty()) return;
+
+        if (player != null && (ownerName.equalsIgnoreCase(player.getName()) || ownerName.equals(player.getUniqueId().toString()))) {
+            applyOnlinePlayerProfile(skullMeta, player);
+            return;
+        }
+
+        OfflinePlayer owner = Bukkit.getOfflinePlayer(ownerName);
+        skullMeta.setOwningPlayer(owner);
+    }
+
+    private static boolean applyOnlinePlayerProfile(SkullMeta skullMeta, Player player) {
+        PlayerProfile profile = player.getPlayerProfile();
+        if (!profile.hasTextures()) {
+            copyGameProfileTextures(player, profile);
+        }
+        if (!profile.hasTextures()) return false;
+
+        skullMeta.setPlayerProfile(profile);
+        return true;
+    }
+
+    private static void copyGameProfileTextures(Player player, PlayerProfile targetProfile) {
+        try {
+            Object handle = player.getClass().getMethod("getHandle").invoke(player);
+            Object gameProfile = handle.getClass().getMethod("getGameProfile").invoke(handle);
+            Object properties = gameProfile.getClass().getMethod("getProperties").invoke(gameProfile);
+            Object textureProperties = properties.getClass().getMethod("get", Object.class).invoke(properties, "textures");
+            if (!(textureProperties instanceof Iterable<?> iterable)) return;
+
+            for (Object property : iterable) {
+                Object valueObject = invokeFirst(property, "value", "getValue");
+                if (valueObject == null) return;
+                String value = String.valueOf(valueObject);
+                Object signatureValue = invokeFirst(property, "signature", "getSignature");
+                String signature = signatureValue == null ? null : String.valueOf(signatureValue);
+                targetProfile.setProperty(new ProfileProperty("textures", value, signature));
+                return;
+            }
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+        }
+    }
+
+    private static Object invokeFirst(Object target, String... methodNames) throws ReflectiveOperationException {
+        for (String methodName : methodNames) {
+            try {
+                return target.getClass().getMethod(methodName).invoke(target);
+            } catch (NoSuchMethodException ignored) {
+            }
+        }
+        return null;
+    }
+
+    private static String replacePlayerPlaceholders(String text, Player player) {
+        if (text == null || player == null) return text;
+        return text
+                .replace("{player}", player.getName())
+                .replace("{owner}", player.getName())
+                .replace("{uuid}", player.getUniqueId().toString());
+    }
+
+    private static void applyStaticItems(PaginatedGui gui, VContainer plugin, String menuName) {
+        ConfigurationSection items = menu(plugin, menuName).getConfigurationSection("items");
+        if (items == null) {
+            GuiItem filler = ItemBuilder.from(createFiller()).asGuiItem(event -> event.setCancelled(true));
+            for (int slot = 45; slot < 54; slot++) {
+                gui.setItem(slot, filler);
+            }
+            return;
+        }
+
+        for (String key : items.getKeys(false)) {
+            ConfigurationSection section = items.getConfigurationSection(key);
+            if (section == null || !"decoration".equalsIgnoreCase(section.getString("action", ""))) continue;
+
+            GuiItem item = ItemBuilder.from(createItem(section, createFiller())).asGuiItem(event -> event.setCancelled(true));
+            for (int slot : itemSlots(section)) {
+                gui.setItem(slot, item);
+            }
+        }
+    }
+
+    private static ItemStack createItem(ConfigurationSection section, ItemStack fallback) {
+        Material material = Material.matchMaterial(section.getString("material", fallback.getType().name()));
+        ItemStack item = new ItemStack(material == null ? fallback.getType() : material);
+        ItemMeta meta = item.getItemMeta();
+        if (meta != null) {
+            meta.setDisplayName(VContainer.formatMessage(section.getString("display_name", section.getString("name", " "))));
+            List<String> lore = new ArrayList<>();
+            for (String line : section.getStringList("lore")) {
                 lore.add(VContainer.formatMessage(line));
             }
             meta.setLore(lore);
@@ -528,6 +647,112 @@ public class ContainerGUI {
             item.setItemMeta(meta);
         }
         return item;
+    }
+
+    private static ConfigurationSection itemSection(VContainer plugin, String menuName, String action, String legacyPath) {
+        ConfigurationSection items = menu(plugin, menuName).getConfigurationSection("items");
+        if (items != null) {
+            for (String key : items.getKeys(false)) {
+                ConfigurationSection section = items.getConfigurationSection(key);
+                if (section != null && action.equalsIgnoreCase(section.getString("action", ""))) {
+                    return section;
+                }
+            }
+        }
+        return menu(plugin, menuName).getConfigurationSection("buttons." + legacyPath);
+    }
+
+    private static int itemSlot(VContainer plugin, String menuName, String action, int fallback) {
+        ConfigurationSection section = itemSection(plugin, menuName, action, legacyButtonPath(action));
+        if (section == null) return fallback;
+
+        List<Integer> slots = itemSlots(section);
+        return slots.isEmpty() ? fallback : slots.get(0);
+    }
+
+    private static List<Integer> itemSlots(ConfigurationSection section) {
+        Set<Integer> slots = new LinkedHashSet<>();
+        if (section.contains("slot")) {
+            slots.add(parseSlot(section.get("slot"), -1));
+        }
+        for (Object raw : section.getList("slots", List.of())) {
+            addSlotValue(slots, raw);
+        }
+        slots.remove(-1);
+        return new ArrayList<>(slots);
+    }
+
+    private static void addSlotValue(Set<Integer> slots, Object raw) {
+        if (raw instanceof Number number) {
+            slots.add(number.intValue());
+            return;
+        }
+
+        String value = String.valueOf(raw).trim();
+        if (value.contains("-")) {
+            String[] parts = value.split("-", 2);
+            int from = parseSlot(parts[0], -1);
+            int to = parseSlot(parts[1], -1);
+            if (from >= 0 && to >= from) {
+                for (int slot = from; slot <= to; slot++) {
+                    slots.add(slot);
+                }
+            }
+            return;
+        }
+        slots.add(parseSlot(value, -1));
+    }
+
+    private static int parseSlot(Object raw, int fallback) {
+        if (raw instanceof Number number) return number.intValue();
+        String value = String.valueOf(raw).replace(" ", "");
+        if (value.isEmpty()) return fallback;
+
+        int total = 0;
+        for (String part : value.split("\\+")) {
+            try {
+                total += Integer.parseInt(part);
+            } catch (NumberFormatException e) {
+                return fallback;
+            }
+        }
+        return total;
+    }
+
+    private static int menuRows(VContainer plugin, String menuName, int fallback) {
+        int rows = menu(plugin, menuName).getInt("rows", fallback);
+        return Math.max(1, Math.min(6, rows));
+    }
+
+    private static int menuPageSize(VContainer plugin, String menuName, int fallback) {
+        if (menu(plugin, menuName).contains("page-size")) {
+            return Math.max(1, menu(plugin, menuName).getInt("page-size", fallback));
+        }
+
+        ConfigurationSection section = itemSection(plugin, menuName, "container-item", "container-item");
+        if (section != null) {
+            List<Integer> slots = itemSlots(section);
+            if (!slots.isEmpty()) return slots.size();
+        }
+        return fallback;
+    }
+
+    private static List<String> getStringList(ConfigurationSection section, String primary, String legacy, List<String> fallback) {
+        List<String> values = section.getStringList(primary);
+        if (!values.isEmpty()) return values;
+        values = section.getStringList(legacy);
+        return values.isEmpty() ? fallback : values;
+    }
+
+    private static String legacyButtonPath(String action) {
+        return switch (action) {
+            case "page-prev" -> "prev";
+            case "page-next" -> "next";
+            case "storage-pickup" -> "pickup";
+            case "storage-members" -> "members";
+            case "member-toggle" -> "player";
+            default -> action;
+        };
     }
 
     private static org.bukkit.configuration.file.FileConfiguration menu(VContainer plugin, String name) {
