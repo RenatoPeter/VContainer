@@ -8,8 +8,13 @@ import hu.vzone.vcontainer.managers.StorageBlockManager.StorageBlock;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageType;
 import hu.vzone.vcontainer.utils.PermissionUtils;
 import hu.vzone.vcontainer.utils.StorageBlockItem;
+import org.bukkit.Bukkit;
+import org.bukkit.GameMode;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
+import org.bukkit.block.BlockFace;
 import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.Directional;
 import org.bukkit.block.data.type.SculkShrieker;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
@@ -22,6 +27,7 @@ import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
+import org.bukkit.inventory.ItemStack;
 
 public class ContainerListener implements Listener {
 
@@ -42,9 +48,16 @@ public class ContainerListener implements Listener {
         StorageBlock storageBlock = storageBlockManager.get(block);
         if (storageBlock == null) return;
 
+        Player player = event.getPlayer();
+        if (storageBlock.type() == StorageType.PERSONAL && player.isSneaking()) {
+            if (tryAttachHopper(event, block, player)) {
+                event.setCancelled(true);
+            }
+            return;
+        }
+
         event.setCancelled(true);
 
-        Player player = event.getPlayer();
         if (!PermissionUtils.has(player, "vcontainer.block.use")) {
             send(player, "storage-block.no-use-permission", "{prefix} You don't have permission to use this storage block.");
             return;
@@ -66,6 +79,14 @@ public class ContainerListener implements Listener {
     public void onStorageBlockPlace(BlockPlaceEvent event) {
         if (!StorageBlockItem.isStorageBlockItem(VContainer.getInstance(), event.getItemInHand())) return;
 
+        if (!storageBlockManager.canPlacePersonal(event.getBlockPlaced(), event.getPlayer())) {
+            event.setCancelled(true);
+            int limit = storageBlockManager.personalChunkLimit();
+            send(event.getPlayer(), "storage-block.chunk-limit", "{prefix} You can only place {limit} personal storage blocks in this chunk."
+                    .replace("{limit}", String.valueOf(limit)));
+            return;
+        }
+
         if (!storageBlockManager.addPersonal(event.getBlockPlaced(), event.getPlayer())) {
             event.setCancelled(true);
             return;
@@ -82,7 +103,8 @@ public class ContainerListener implements Listener {
 
     @EventHandler
     public void onStorageBlockBreak(BlockBreakEvent event) {
-        if (!storageBlockManager.isStorageBlock(event.getBlock())) return;
+        StorageBlock storageBlock = storageBlockManager.get(event.getBlock());
+        if (storageBlock == null) return;
 
         event.setCancelled(true);
 
@@ -120,5 +142,32 @@ public class ContainerListener implements Listener {
     private void send(Player player, String path, String fallback) {
         VContainer plugin = VContainer.getInstance();
         player.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString(path, fallback)));
+    }
+
+    private boolean tryAttachHopper(PlayerInteractEvent event, Block storageBlock, Player player) {
+        ItemStack item = player.getInventory().getItemInMainHand();
+        if (item.getType() != Material.HOPPER) return false;
+
+        BlockFace face = event.getBlockFace();
+        Block target = storageBlock.getRelative(face);
+        if (!target.getType().isAir()) return false;
+
+        BlockFace hopperFacing = face.getOppositeFace();
+        BlockData data = Bukkit.createBlockData(Material.HOPPER);
+        if (data instanceof Directional directional) {
+            if (!directional.getFaces().contains(hopperFacing)) return false;
+            directional.setFacing(hopperFacing);
+            data = directional;
+        }
+
+        target.setBlockData(data, true);
+        if (player.getGameMode() != GameMode.CREATIVE) {
+            if (item.getAmount() <= 1) {
+                player.getInventory().setItemInMainHand(null);
+            } else {
+                item.setAmount(item.getAmount() - 1);
+            }
+        }
+        return true;
     }
 }

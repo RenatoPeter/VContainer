@@ -1,0 +1,47 @@
+# ============================================================================
+# VContainer database configuration
+# ----------------------------------------------------------------------------
+# This file controls only storage and SQL connection details.
+#
+# Supported storage types:
+# - LOCAL   = JSON files
+# - MYSQL   = MySQL backend
+# - MARIADB = MariaDB backend
+# - H2      = embedded SQL backend
+# ============================================================================
+config-version: 1
+
+storage:
+  # Active storage backend.
+  Type: LOCAL
+
+  # Hostname or IP for MYSQL / MARIADB.
+  Hostname: 172.168.0.1
+
+  # SQL port.
+  Port: 3306
+
+  # SQL username.
+  Username: minecraft
+
+  # SQL password.
+  Password: ""
+
+  # Database name / schema.
+  Database: minecraft
+
+  # HikariCP maximum pool size.
+  Pool Size: 5
+
+  # SSL toggle for generated SQL URLs.
+  Use SSL: false
+
+  # Optional full JDBC URL override.
+  # Leave empty to let the plugin build the URL automatically.
+  Jdbc Url: ""
+
+  # Optional explicit JDBC driver class override.
+  Driver Class: ""
+
+  # Prefix added before every VContainer SQL table name.
+  Prefix: vcontainer_

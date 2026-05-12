@@ -32,6 +32,9 @@ permissions:
   vcontainer.block.remove:
     description: Allows removing storage blocks by sneaking and breaking them
     default: op
+  vcontainer.block.limit.bypass:
+    description: Bypasses the per-chunk personal storage block limit
+    default: op
   vcontainer.notify:
     description: Allows receiving container item notifications
     default: op

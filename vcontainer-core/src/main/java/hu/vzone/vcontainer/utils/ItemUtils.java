@@ -62,4 +62,12 @@ public class ItemUtils {
             return items;
         }
     }
+
+    public static byte[] toBytes(ItemStack item) {
+        return item.serializeAsBytes();
+    }
+
+    public static ItemStack fromBytes(byte[] bytes) {
+        return ItemStack.deserializeBytes(bytes);
+    }
 }

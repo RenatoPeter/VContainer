@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class ContainerGUI {
 
@@ -43,6 +44,9 @@ public class ContainerGUI {
     private static final int MEMBERS_SLOT = 53;
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacySection();
     private static final Map<UUID, SortMode> SORT_MODES = new ConcurrentHashMap<>();
+    private static final Map<UUID, OpenContainerView> OPEN_VIEWS = new ConcurrentHashMap<>();
+    private static final AtomicLong VIEW_IDS = new AtomicLong();
+    private static final java.util.Set<UUID> QUEUED_REFRESHES = ConcurrentHashMap.newKeySet();
 
     public static void openContainer(Player player, ContainerManager manager, int page) {
         openContainer(player, player.getUniqueId(), player.getName(), manager, page);
@@ -58,6 +62,17 @@ public class ContainerGUI {
 
     public static void clearSortPreference(UUID playerId) {
         SORT_MODES.remove(playerId);
+        OPEN_VIEWS.remove(playerId);
+    }
+
+    public static void queueRefresh(UUID ownerId) {
+        if (ownerId == null || !QUEUED_REFRESHES.add(ownerId)) return;
+
+        VContainer plugin = VContainer.getInstance();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            QUEUED_REFRESHES.remove(ownerId);
+            refreshOpenContainers(ownerId);
+        });
     }
 
     private static void openContainer(Player viewer, UUID ownerId, String ownerName, ContainerManager manager, int page) {
@@ -86,6 +101,8 @@ public class ContainerGUI {
                 .rows(ROWS)
                 .pageSize(PAGE_SIZE)
                 .create();
+
+        registerOpenView(gui, viewer, ownerId, ownerName, manager, targetPage, storageBlockManager, storageKey);
 
         gui.setDefaultClickAction(event -> {
             event.setCancelled(true);
@@ -194,6 +211,58 @@ public class ContainerGUI {
         gui.open(viewer, targetPage);
     }
 
+    private static void registerOpenView(
+            PaginatedGui gui,
+            Player viewer,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey
+    ) {
+        long viewId = VIEW_IDS.incrementAndGet();
+        OPEN_VIEWS.put(viewer.getUniqueId(), new OpenContainerView(
+                viewId,
+                viewer.getUniqueId(),
+                ownerId,
+                ownerName,
+                manager,
+                page,
+                storageBlockManager,
+                storageKey
+        ));
+
+        gui.setCloseGuiAction(event -> Bukkit.getScheduler().runTask(VContainer.getInstance(), () -> {
+            OpenContainerView current = OPEN_VIEWS.get(viewer.getUniqueId());
+            if (current != null && current.viewId() == viewId) {
+                OPEN_VIEWS.remove(viewer.getUniqueId());
+            }
+        }));
+    }
+
+    private static void refreshOpenContainers(UUID ownerId) {
+        for (OpenContainerView view : new ArrayList<>(OPEN_VIEWS.values())) {
+            if (!view.ownerId().equals(ownerId)) continue;
+
+            Player viewer = Bukkit.getPlayer(view.viewerId());
+            if (viewer == null || !viewer.isOnline()) {
+                OPEN_VIEWS.remove(view.viewerId());
+                continue;
+            }
+
+            openContainer(
+                    viewer,
+                    view.ownerId(),
+                    view.ownerName(),
+                    view.manager(),
+                    view.page(),
+                    view.storageBlockManager(),
+                    view.storageKey()
+            );
+        }
+    }
+
     private static int getWithdrawAmount(
             ClickType click,
             DisplayEntry entry,
@@ -203,6 +272,7 @@ public class ContainerGUI {
             ItemStack target
     ) {
         if (click.isShiftClick() && shiftWithdrawFit) return getTotalAmount(containerItems, target);
+        if (click == ClickType.MIDDLE) return target.getMaxStackSize();
         if (click.isRightClick()) return 1;
         return compactDisplay ? entry.amount() : entry.item().getAmount();
     }
@@ -481,27 +551,72 @@ public class ContainerGUI {
                         ? new ArrayList<>(meta.getLore())
                         : new ArrayList<>();
 
-                lore.add(VContainer.formatMessage(plugin.getConfig().getString(
-                        "container-options.compact-display.amount-line",
-                        "&7Item stack size: &f{amount}"
-                ).replace("{amount}", String.valueOf(entry.amount()))));
-
-                if (allowWithdraw) {
-                    lore.add(VContainer.formatMessage(plugin.getConfig().getString(
-                            "container-options.compact-display.withdraw-all-line",
-                            "&eLeft click to withdraw all"
-                    )));
-                    lore.add(VContainer.formatMessage(plugin.getConfig().getString(
-                            "container-options.compact-display.withdraw-one-line",
-                            "&eRight click to withdraw 1"
-                    )));
-                }
+                lore.addAll(createCompactLore(plugin, entry.amount(), allowWithdraw));
 
                 meta.setLore(lore);
                 item.setItemMeta(meta);
             }
         }
         return item;
+    }
+
+    private static List<String> createCompactLore(VContainer plugin, int amount, boolean allowWithdraw) {
+        String amountLine = getCompactLine(plugin, "size", "amount", true, "&7Item stack size: &f{amount}")
+                .replace("{amount}", String.valueOf(amount));
+        if (!isCompactLineEnabled(plugin, "size", "amount", true)) amountLine = "";
+
+        String withdrawAllLine = allowWithdraw && isCompactLineEnabled(plugin, "withdraw-all", "withdraw-all", true)
+                ? getCompactLine(plugin, "withdraw-all", "withdraw-all", true, "&eLeft click to withdraw all")
+                : "";
+        String withdrawOneLine = allowWithdraw && isCompactLineEnabled(plugin, "withdraw", "withdraw-one", true)
+                ? getCompactLine(plugin, "withdraw", "withdraw-one", true, "&eRight click to withdraw 1")
+                : "";
+        String withdrawStackLine = allowWithdraw && isCompactLineEnabled(plugin, "withdraw-stack", "withdraw-stack", true)
+                ? getCompactLine(plugin, "withdraw-stack", "withdraw-stack", true, "&eMiddle click to withdraw 1 stack")
+                : "";
+
+        List<String> format = plugin.getConfig().getStringList("container-options.compact-display.format");
+        if (format.isEmpty()) {
+            format = new ArrayList<>();
+            format.add("%amount-line%");
+            if (allowWithdraw) {
+                format.add("%withdraw-all-line%");
+                format.add("%withdraw-one-line%");
+                format.add("%withdraw-stack-line%");
+            }
+        }
+
+        List<String> lore = new ArrayList<>();
+        for (String line : format) {
+            String formatted = line
+                    .replace("%amount-line%", amountLine)
+                    .replace("%withdraw-all-line%", withdrawAllLine)
+                    .replace("%withdraw-one-line%", withdrawOneLine)
+                    .replace("%withdraw-stack-line%", withdrawStackLine);
+            if (!formatted.isEmpty() || line.isEmpty()) {
+                lore.add(VContainer.formatMessage(formatted));
+            }
+        }
+        return lore;
+    }
+
+    private static boolean isCompactLineEnabled(VContainer plugin, String section, String legacyPrefix, boolean fallback) {
+        String base = "container-options.compact-display.";
+        if (plugin.getConfig().contains(base + section + ".enable")) {
+            return plugin.getConfig().getBoolean(base + section + ".enable", fallback);
+        }
+        if (plugin.getConfig().contains(base + section + ".enabled")) {
+            return plugin.getConfig().getBoolean(base + section + ".enabled", fallback);
+        }
+        return plugin.getConfig().getBoolean(base + legacyPrefix + "-line-enabled", fallback);
+    }
+
+    private static String getCompactLine(VContainer plugin, String section, String legacyPrefix, boolean fallbackEnabled, String fallbackLine) {
+        String base = "container-options.compact-display.";
+        if (!isCompactLineEnabled(plugin, section, legacyPrefix, fallbackEnabled)) return "";
+        String nested = plugin.getConfig().getString(base + section + ".line");
+        if (nested != null) return nested;
+        return plugin.getConfig().getString(base + legacyPrefix + "-line", fallbackLine);
     }
 
     private static Component title(VContainer plugin, int page, int maxPage) {
@@ -583,5 +698,17 @@ public class ContainerGUI {
     }
 
     private record DisplayEntry(ItemStack item, int amount) {
+    }
+
+    private record OpenContainerView(
+            long viewId,
+            UUID viewerId,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey
+    ) {
     }
 }

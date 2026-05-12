@@ -1,145 +1,346 @@
 # VContainer
 
-VContainer egy Paper alapú Minecraft plugin, amely játékosonként külön virtuális tárolót kezel. A tároló GUI-ból nyitható, lapozható, az itemek JSON fájlokba mentődnek, és admin parancsból Minecraft, Oraxen vagy MythicMobs itemek is hozzáadhatók.
+VContainer is a Paper Minecraft plugin that gives every player a persistent virtual container. It supports GUI-based deposits and withdrawals, admin-managed storage blocks, player-owned placeable storage blocks, hopper input/output, multiple storage backends, and a public Bukkit API for other plugins.
 
-## Fő funkciók
-
-- Játékosonként külön virtuális konténer.
-- 54 slotos GUI, 45 tartalom slottal és alsó navigációs sorral.
-- Lapozás nagyobb itemmennyiségnél.
-- Item kivétel kattintással, inventory telítettség ellenőrzéssel.
-- Itemek mentése játékos UUID alapján JSON fájlba.
-- Opcionális item stackelés NBT/meta egyezés alapján.
-- Admin nyitás, ürítés, reload és item hozzáadás.
-- Opcionális Oraxen és MythicMobs item támogatás.
-- Egyszerű publikus API más pluginek számára.
-
-## Követelmények
+## Requirements
 
 - Java 21
-- Paper API / Paper szerver 1.21.x
-- Maven 3.x a fordításhoz
-- Opcionális: Oraxen
-- Opcionális: MythicMobs
+- Paper 1.21.x
+- Maven 3.x to build from source
+- Optional soft dependencies:
+  - Oraxen
+  - MythicMobs
+  - ItemsAdder
 
-## Projekt felépítés
+## Features
 
-```text
-VContainer/
-├── pom.xml
-├── vcontainer-api/
-│   └── src/main/java/hu/vzone/vcontainer/api/
-└── vcontainer-core/
-    ├── src/main/java/hu/vzone/vcontainer/
-    └── src/main/resources/
-```
+- Per-player virtual containers.
+- Paginated Triumph GUI menu.
+- Player-controlled sorting modes in the menu.
+- Optional compact item display with total amount lore.
+- Configurable deposit and withdrawal behavior.
+- Shift-click bulk deposit/withdraw.
+- Middle-click withdraw one stack.
+- Admin commands for opening, clearing, giving items, and setting storage blocks.
+- Personal storage block item with owner/member access control.
+- Hopper input/output for personal storage blocks.
+- Per-player per-chunk personal storage block limit.
+- Holograms for global and personal storage blocks.
+- Local JSON, MySQL, MariaDB, and H2 storage backends.
+- Public API exposed through Bukkit `ServicesManager`.
 
-- `vcontainer-api`: a publikus API interfész.
-- `vcontainer-core`: maga a plugin implementáció, GUI, parancsok, listener és adatkezelés.
+## Building
 
-## Fordítás
-
-A projekt gyökeréből:
+From the project root:
 
 ```bash
 mvn clean package
 ```
 
-A kész plugin jar a core modul target mappájába kerül:
+The plugin jar is created in:
 
 ```text
 vcontainer-core/target/VContainer-1.0.0.jar
 ```
 
-## Telepítés
+## Installation
 
-1. Fordítsd le a projektet Mavennel.
-2. Másold a `vcontainer-core/target/VContainer-1.0.0.jar` fájlt a szerver `plugins` mappájába.
-3. Indítsd újra a szervert.
-4. A plugin létrehozza a konfigurációs fájlokat a `plugins/VContainer/` mappában.
+1. Build the project or download the compiled jar.
+2. Place the core jar into your server `plugins/` folder.
+3. Start the server.
+4. Edit the generated files in `plugins/VContainer/`.
+5. Restart the server or use `/vcontainer reload` for reloadable settings.
 
-## Parancsok
+## Commands
 
-| Parancs | Jogosultság | Leírás |
+| Command | Permission | Description |
 | --- | --- | --- |
-| `/container` | `vcontainer.use` | Megnyitja a saját konténert. |
-| `/vcontainer` | `vcontainer.admin` | Kiírja az admin súgót. |
-| `/vcontainer open <player>` | `vcontainer.admin` | Megnyitja egy online játékos konténerét. |
-| `/vcontainer clear <player>` | `vcontainer.admin` | Kiüríti egy online játékos konténerét. |
-| `/vcontainer give minecraft <item> [player] [amount]` | `vcontainer.admin` | Vanilla Minecraft itemet ad a konténerbe. |
-| `/vcontainer give oraxen <item_id> [player] [amount]` | `vcontainer.admin` | Oraxen itemet ad a konténerbe, ha az Oraxen fut. |
-| `/vcontainer give mythicmobs <item_id> [player] [amount]` | `vcontainer.admin` | MythicMobs itemet ad a konténerbe, ha a MythicMobs fut. |
-| `/vcontainer reload` | `vcontainer.admin` | Újratölti a configot és a messages fájlt. |
+| `/container` | `vcontainer.use` | Opens your own virtual container. |
+| `/vcontainer` | `vcontainer.admin` | Shows the admin command help. |
+| `/vcontainer reload` | `vcontainer.admin` | Reloads config, messages, menu configs, holograms, and hopper timing. |
+| `/vcontainer open <player>` | `vcontainer.admin` | Opens another online player's container. Player sender only. |
+| `/vcontainer clear <player>` | `vcontainer.admin` | Clears another online player's container. |
+| `/vcontainer give minecraft <item> [player] [amount]` | `vcontainer.admin` | Adds a vanilla Minecraft item to a player's virtual container. |
+| `/vcontainer give oraxen <item_id> [player] [amount]` | `vcontainer.admin` | Adds an Oraxen item if Oraxen is installed. |
+| `/vcontainer give mythicmobs <item_id> [player] [amount]` | `vcontainer.admin` | Adds a MythicMobs item if MythicMobs is installed. |
+| `/vcontainer give itemsadder <namespace:id> [player] [amount]` | `vcontainer.admin` | Adds an ItemsAdder item if ItemsAdder is installed. |
+| `/vcontainer set` | `vcontainer.admin` and `vcontainer.admin.set` | Marks the block you are looking at as a global storage block. Player sender only. |
+| `/vcontainer give-block [player] [amount] -s` | `vcontainer.admin` | Gives a personal storage block item. `player` defaults to the sender, `amount` defaults to `1`, and `-s` hides the received message from the target. |
 
-Az admin `give` parancsnál, ha a játékos nincs megadva és a parancsot játékos futtatja, a plugin a parancsot futtató játékos konténerébe adja az itemet.
+## Permissions
 
-## Jogosultságok
+| Permission | Default | Description |
+| --- | --- | --- |
+| `vcontainer.use` | `op` | Allows `/container`. |
+| `vcontainer.admin` | `op` | Allows admin commands. |
+| `vcontainer.admin.set` | `op` | Allows `/vcontainer set`. |
+| `vcontainer.block.use` | `op` | Allows opening containers through storage blocks. |
+| `vcontainer.block.remove` | `op` | Allows removing global storage blocks by sneaking and breaking them. |
+| `vcontainer.block.limit.bypass` | `op` | Bypasses the per-chunk personal storage block limit. |
+| `vcontainer.notify` | `op` | Allows receiving container item notification messages. |
 
-| Jogosultság | Leírás |
-| --- | --- |
-| `vcontainer.use` | Saját konténer megnyitása. |
-| `vcontainer.admin` | Admin parancsok használata. |
-| `vcontainer.notify` | Konténerből kivett itemről visszajelző üzenet fogadása. |
+OP players bypass plugin permission checks through the internal permission helper.
 
-## Konfiguráció
+## Container Menu
 
-Alapértelmezett `config.yml`:
+Players can deposit and withdraw items through the GUI.
 
-```yaml
-title: "&0Container %current-page%/%max-page%"
+Default interactions:
 
-content-slots: []
+- Left-click a displayed item: withdraw all shown amount.
+- Right-click a displayed item: withdraw 1 item.
+- Middle-click a displayed item: withdraw 1 stack.
+- Shift-click a displayed item: withdraw as many matching items as can fit, if enabled.
+- Click an item in the player's inventory: deposit that item.
+- Shift-click from the player's inventory: deposit all configured inventory contents, if enabled.
 
-buttons:
-  prev:
-    material: ARROW
-    name: "&a« Prev"
-    lore:
-      - "&7Previous Page"
-    slot: 45+3
-  next:
-    material: ARROW
-    name: "&aNext »"
-    lore:
-      - "&7Next Page"
-    slot: 45+5
+The menu has a sorting button. Sorting is per player, not global config. Available modes:
 
-stack: true
-max-stack: 64
-player-data-folder: player_data
-```
+- None
+- ABC A-Z
+- ABC Z-A
+- Most items
+- Fewest items
 
-Fontosabb beállítások:
+## Storage Blocks
 
-- `title`: a GUI címe. Használható placeholder: `%current-page%`, `%max-page%`.
-- `stack`: ha `true`, az azonos típusú és azonos meta/NBT adatú itemek stackelődnek.
-- `max-stack`: a plugin által használt maximális stack méret.
-- `buttons.prev` és `buttons.next`: lapozógombok kinézete.
-- `player-data-folder`: tervezett adatkönyvtár neve. A jelenlegi implementáció a `plugins/VContainer/player_data/` mappát használja.
+### Global Storage Blocks
 
-Az üzenetek a `messages.yml` fájlban módosíthatók. A plugin támogatja az `&` színkódokat és a hex formátumot is, például: `&#1898FF`.
-
-## Adattárolás
-
-A konténerek játékosonként külön JSON fájlba kerülnek:
+Global storage blocks are created with:
 
 ```text
-plugins/VContainer/player_data/<player-uuid>.json
+/vcontainer set
 ```
 
-A fájlban az itemlista Base64 formában tárolódik Bukkit szerializációval. Emiatt a mentések Bukkit/Paper item meta adatokat is megőriznek, például display name, lore, enchantok és persistent data.
+The command marks the block the admin is looking at. Any player with `vcontainer.block.use` can right-click it to open their own virtual container.
 
-## GUI működés
+Global storage blocks:
 
-- A GUI mérete 6 sor, összesen 54 slot.
-- Az első 5 sor tartalomként működik, oldalanként legfeljebb 45 itemmel.
-- Az utolsó sor dekorációs/navigációs sor.
-- A lapozógombok alapértelmezetten az utolsó sor 4. és 6. slotján vannak.
-- Kattintáskor az item a játékos inventoryjába kerül, majd a konténer frissül.
+- cannot be broken normally,
+- can be removed by a player with `vcontainer.block.remove` using sneak + break,
+- are protected from block and entity explosions,
+- have a configurable hologram.
 
-## API használat
+### Personal Storage Blocks
 
-Más pluginek a Bukkit ServicesManageren keresztül érhetik el az API-t:
+Admins can give the item with:
+
+```text
+/vcontainer give-block [player] [amount] -s
+```
+
+The item is identified with a `NamespacedKey` in the item's persistent data. By default it is a `SCULK_SHRIEKER`, and placed sculk shriekers are configured not to summon wardens.
+
+When placed, the block always opens the owner's container. Access is limited to:
+
+- the owner,
+- OP players,
+- added members.
+
+The owner gets extra menu buttons for:
+
+- picking up the personal storage block,
+- managing added players.
+
+Personal storage blocks:
+
+- cannot be removed by sneak-breaking,
+- are picked up from the owner-only menu button,
+- have separate hologram lines,
+- support hopper input and output,
+- are protected from explosions.
+
+### Hopper Behavior
+
+Personal storage blocks support hopper transfer.
+
+- Hopper input: a hopper facing into the personal storage block inserts items into the owner's virtual container.
+- Hopper output: a hopper below the personal storage block pulls items from the owner's virtual container.
+- Open container GUIs update live when hopper transfers change the contents.
+- Sneak + right-clicking a personal storage block with a hopper attempts to attach the hopper to the clicked side and face it toward the storage block.
+
+Hopper behavior is controlled in `config.yml`:
+
+```yaml
+storage-block:
+  hoppers:
+    enabled: true
+    input: true
+    output: true
+    interval-ticks: 8
+```
+
+### Personal Block Chunk Limit
+
+Each player can place a limited number of personal storage blocks in the same chunk:
+
+```yaml
+storage-block:
+  personal:
+    chunk-limit: 4
+```
+
+Use `vcontainer.block.limit.bypass` to bypass this limit.
+
+## Configuration Files
+
+VContainer generates these main files:
+
+```text
+plugins/VContainer/
+  config.yml
+  database.yml
+  messages.yml
+  menus/
+    container.yml
+    members.yml
+```
+
+### `config.yml`
+
+Important sections:
+
+- `container-options.allow-deposit`: allows players to deposit items from their inventory.
+- `container-options.allow-withdraw`: allows players to withdraw items.
+- `container-options.messages.deposit`: toggles deposit messages.
+- `container-options.messages.withdraw`: toggles withdraw messages.
+- `container-options.shift-transfer.deposit-all`: enables shift-click deposit all.
+- `container-options.shift-transfer.withdraw-fit`: enables shift-click withdraw as much as fits.
+- `container-options.shift-transfer.include-armor`: includes armor in bulk deposit.
+- `container-options.shift-transfer.include-offhand`: includes offhand in bulk deposit.
+- `container-options.compact-display.enabled`: shows one icon per equal item with total amount in lore.
+- `stack`: merges equal items when added.
+- `max-stack`: maximum stack size used by VContainer when stacking.
+
+Compact display lore is configurable:
+
+```yaml
+container-options:
+  compact-display:
+    enabled: false
+    size:
+      enable: true
+      line: "&7Item stack size: &f{amount}"
+    withdraw-all:
+      enable: true
+      line: "&eLeft click to withdraw all"
+    withdraw:
+      enable: true
+      line: "&eRight click to withdraw 1"
+    withdraw-stack:
+      enable: true
+      line: "&eMiddle click to withdraw 1 stack"
+    format:
+      - ""
+      - "&8----------"
+      - "%amount-line%"
+      - "%withdraw-all-line%"
+      - "%withdraw-one-line%"
+      - "%withdraw-stack-line%"
+      - "&8----------"
+```
+
+Storage block item and hologram settings:
+
+```yaml
+storage-block:
+  set-target-distance: 6
+  item:
+    material: SCULK_SHRIEKER
+    name: "&bPersonal Storage Block"
+    lore:
+      - "&7Place this block to create"
+      - "&7your own linked storage."
+  hologram:
+    enabled: true
+    height: 1.35
+    see-through: false
+    shadow: true
+    lines:
+      - "&bVContainer"
+      - "&7Right click to open"
+    personal-lines:
+      - "&bPersonal VContainer"
+      - "&7Owner: &f{owner}"
+      - "&7Right click to open"
+      - "&8Hoppers can insert items"
+```
+
+## Database And Storage
+
+Storage backend is configured in `database.yml`.
+
+Supported types:
+
+- `LOCAL`: JSON files
+- `MYSQL`: MySQL database
+- `MARIADB`: MariaDB database
+- `H2`: embedded SQL database
+
+Example:
+
+```yaml
+storage:
+  Type: LOCAL
+  Hostname: 172.168.0.1
+  Port: 3306
+  Username: minecraft
+  Password: ""
+  Database: minecraft
+  Pool Size: 5
+  Use SSL: false
+  Jdbc Url: ""
+  Driver Class: ""
+  Prefix: vcontainer_
+```
+
+### Local Storage Layout
+
+When `storage.Type` is `LOCAL`, files are stored as JSON:
+
+```text
+plugins/VContainer/storage/
+  player_data/
+    <player_uuid>.json
+  global_storage_blocks/
+    <custom_uuid>.json
+  personal_storage_blocks/
+    <custom_uuid>.json
+```
+
+When `storage.Type` is not `LOCAL`, this `storage/` folder is not created automatically.
+
+### SQL Tables
+
+When using `MYSQL`, `MARIADB`, or `H2`, the plugin creates separate tables:
+
+```text
+<prefix>player_data
+<prefix>global_storage_blocks
+<prefix>personal_storage_blocks
+```
+
+With the default prefix:
+
+```text
+vcontainer_player_data
+vcontainer_global_storage_blocks
+vcontainer_personal_storage_blocks
+```
+
+Player items are stored as BLOB data using Paper/Bukkit item byte serialization. This preserves internal item data such as display names, lore, enchantments, and persistent data.
+
+### Save Timing
+
+VContainer does not write every change immediately. It keeps data in memory and flushes changed containers:
+
+- every 2 minutes,
+- on plugin disable,
+- when the API `flush()` method is called.
+
+## API
+
+The API module is `vcontainer-api`. Other plugins can access it through Bukkit's `ServicesManager`:
 
 ```java
 RegisteredServiceProvider<VContainerAPI> provider =
@@ -151,33 +352,89 @@ if (provider != null) {
 }
 ```
 
-Elérhető API metódusok:
+Main API methods:
 
 ```java
 void addItem(Player player, ItemStack item);
+void addItem(UUID ownerId, ItemStack item);
 void removeItem(Player player, ItemStack item);
+void removeItem(UUID ownerId, ItemStack item);
+int takeItem(UUID ownerId, ItemStack item, int amount);
 List<ItemStack> getItems(Player player);
+List<ItemStack> getItems(UUID ownerId);
+boolean containsItem(Player player, ItemStack item);
 void clear(Player player);
+void clear(UUID ownerId);
+
+void openContainer(Player player);
+void openContainer(Player viewer, UUID ownerId, String ownerName);
+void openAdminContainer(Player admin, Player owner);
+void flush();
+
+ItemStack createPersonalStorageBlockItem(int amount);
+boolean isPersonalStorageBlockItem(ItemStack item);
+
+boolean createGlobalStorageBlock(Block block);
+boolean createPersonalStorageBlock(Block block, Player owner);
+boolean removeGlobalStorageBlock(Block block);
+boolean removePersonalStorageBlock(String storageKey, boolean keepBlock);
+boolean isStorageBlock(Block block);
+
+Optional<StorageBlockInfo> getStorageBlock(Block block);
+Optional<StorageBlockInfo> getStorageBlock(String storageKey);
+Collection<StorageBlockInfo> getStorageBlocks();
+Collection<StorageBlockInfo> getGlobalStorageBlocks();
+Collection<StorageBlockInfo> getPersonalStorageBlocks();
+
+boolean canAccessStorageBlock(Player player, String storageKey);
+boolean isStorageBlockOwner(Player player, String storageKey);
+boolean canPlacePersonalStorageBlock(Block block, Player owner);
+int getPersonalStorageBlockChunkLimit();
+
+boolean addStorageBlockMember(String storageKey, UUID memberId);
+boolean removeStorageBlockMember(String storageKey, UUID memberId);
+boolean setStorageBlockMember(String storageKey, UUID memberId, boolean member);
+
+String getStorageBlockKey(Block block);
+String getStorageBackendType();
+boolean isLocalStorageBackend();
 ```
 
-## Opcionális plugin támogatás
+Storage block API responses use:
 
-A `plugin.yml` szerint az Oraxen és a MythicMobs soft dependency:
-
-```yaml
-softdepend:
-  - Oraxen
-  - MythicMobs
+```java
+record StorageBlockInfo(
+    UUID id,
+    String key,
+    StorageBlockType type,
+    UUID ownerId,
+    String ownerName,
+    Set<UUID> members
+)
 ```
 
-Ha ezek a pluginek futnak a szerveren, a `/vcontainer give` parancs képes az általuk definiált itemeket is konténerbe adni.
+`StorageBlockType` values:
 
-## Fejlesztői megjegyzések
+```java
+GLOBAL
+PERSONAL
+```
 
-- A fő plugin osztály: `hu.vzone.vcontainer.VContainer`
-- A konténer logika: `ContainerManager`
-- A GUI: `ContainerGUI`
-- A kattintáskezelés: `ContainerListener`
-- A publikus API implementáció: `VContainerAPIImpl`
+The API also includes `ContainerAddItemEvent`, fired before an item is added through the player-aware add path. Cancelling the event prevents the add.
 
-Jelenleg a `ContainerAddItemEvent` osztály üres, ezért publikus eventként még nem használható.
+## Developer Notes
+
+- Main plugin class: `hu.vzone.vcontainer.VContainer`
+- Container logic: `ContainerManager`
+- Storage block logic: `StorageBlockManager`
+- GUI logic: `ContainerGUI`
+- Public API interface: `VContainerAPI`
+- Public API implementation: `VContainerAPIImpl`
+- Item serialization helpers: `ItemUtils`
+
+## Compatibility Notes
+
+- Oraxen, MythicMobs, and ItemsAdder are soft dependencies.
+- The plugin shades Triumph GUI and database libraries into the final jar.
+- SQL connection pooling uses HikariCP.
+- MySQL, MariaDB, and H2 drivers are bundled by the build.

@@ -66,7 +66,7 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                 plugin.reloadConfig();
                 plugin.reloadMessageConfig();
                 plugin.reloadMenuConfigs();
-                storageBlockManager.reloadHolograms();
+                storageBlockManager.reload();
                 sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.reload", "{prefix} Plugin successfully reloaded!")));
                 return true;
 
@@ -336,6 +336,10 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
             }
         }
 
+        if (args[0].equalsIgnoreCase("give-block")) {
+            return tabCompleteGiveBlock(args);
+        }
+
         if (args.length == 2 && (args[0].equalsIgnoreCase("open") || args[0].equalsIgnoreCase("clear"))) {
             String partial = args[1].toLowerCase(Locale.ROOT);
             for (Player p : Bukkit.getOnlinePlayers()) {
@@ -346,6 +350,51 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
         }
 
         return Collections.emptyList();
+    }
+
+    private List<String> tabCompleteGiveBlock(String[] args) {
+        String partial = args[args.length - 1].toLowerCase(Locale.ROOT);
+        List<String> suggestions = new ArrayList<>();
+
+        if (args.length == 2) {
+            addOnlinePlayers(suggestions, partial);
+            addIfStartsWith(suggestions, "1", partial);
+            addIfStartsWith(suggestions, "16", partial);
+            addIfStartsWith(suggestions, "64", partial);
+            addIfStartsWith(suggestions, "-s", partial);
+            return suggestions;
+        }
+
+        if (args.length == 3) {
+            addIfStartsWith(suggestions, "1", partial);
+            addIfStartsWith(suggestions, "16", partial);
+            addIfStartsWith(suggestions, "64", partial);
+            if (!containsIgnoreCase(args, "-s")) addIfStartsWith(suggestions, "-s", partial);
+            return suggestions;
+        }
+
+        if (args.length == 4 && !containsIgnoreCase(args, "-s")) {
+            addIfStartsWith(suggestions, "-s", partial);
+        }
+
+        return suggestions;
+    }
+
+    private void addOnlinePlayers(List<String> suggestions, String partial) {
+        for (Player player : Bukkit.getOnlinePlayers()) {
+            addIfStartsWith(suggestions, player.getName(), partial);
+        }
+    }
+
+    private void addIfStartsWith(List<String> suggestions, String value, String partial) {
+        if (value.toLowerCase(Locale.ROOT).startsWith(partial)) suggestions.add(value);
+    }
+
+    private boolean containsIgnoreCase(String[] args, String value) {
+        for (String arg : args) {
+            if (arg.equalsIgnoreCase(value)) return true;
+        }
+        return false;
     }
 
     private GiveBlockArgs parseGiveBlockArgs(CommandSender sender, String[] args) {

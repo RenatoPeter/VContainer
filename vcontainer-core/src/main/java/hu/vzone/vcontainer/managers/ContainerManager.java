@@ -2,16 +2,16 @@ package hu.vzone.vcontainer.managers;
 
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.api.events.ContainerAddItemEvent;
+import hu.vzone.vcontainer.storage.ContainerStorage;
+import hu.vzone.vcontainer.storage.LocalContainerStorage;
+import hu.vzone.vcontainer.storage.SqlContainerStorage;
+import hu.vzone.vcontainer.storage.StorageSettings;
 import hu.vzone.vcontainer.utils.ItemUtils;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.scheduler.BukkitTask;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -23,13 +23,26 @@ import java.util.Set;
 import java.util.UUID;
 
 public class ContainerManager {
+    private static final long AUTO_SAVE_TICKS = 20L * 60L * 2L;
+
     private final VContainer plugin;
+    private final ContainerStorage storage;
     private final Map<UUID, List<ItemStack>> cache = new HashMap<>();
-    private final Set<UUID> saving = new HashSet<>();
-    private final Set<UUID> saveAgain = new HashSet<>();
+    private final Set<UUID> dirty = new HashSet<>();
+    private final Object saveLock = new Object();
+    private BukkitTask autoSaveTask;
 
     public ContainerManager(VContainer plugin) {
         this.plugin = plugin;
+        this.storage = createStorage(plugin);
+        this.cache.putAll(cloneContainers(storage.loadAll()));
+        this.autoSaveTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
+                plugin,
+                this::flushDirtySync,
+                AUTO_SAVE_TICKS,
+                AUTO_SAVE_TICKS
+        );
+        plugin.getLogger().info("Loaded " + cache.size() + " cached container(s) from " + StorageSettings.from(plugin).type() + " storage.");
     }
 
     public void addItemToContainer(Player player, ItemStack item) {
@@ -46,10 +59,10 @@ public class ContainerManager {
         addItemToContainer(ownerId, item);
     }
 
-    public void addItemToContainer(UUID ownerId, ItemStack item) {
+    public synchronized void addItemToContainer(UUID ownerId, ItemStack item) {
         if (item == null || item.getType().isAir() || item.getAmount() <= 0) return;
 
-        List<ItemStack> list = getOrLoad(ownerId);
+        List<ItemStack> list = getOrCreate(ownerId);
         boolean stackEnabled = plugin.getConfig().getBoolean("stack", true);
         int maxStack = Math.max(1, plugin.getConfig().getInt("max-stack", 64));
 
@@ -79,7 +92,7 @@ public class ContainerManager {
             list.add(item.clone());
         }
 
-        save(ownerId, list);
+        markDirty(ownerId);
     }
 
     public void removeItemFromContainer(Player player, ItemStack target) {
@@ -90,10 +103,10 @@ public class ContainerManager {
         takeItemFromContainer(ownerId, target, target == null ? 0 : target.getAmount());
     }
 
-    public int takeItemFromContainer(UUID ownerId, ItemStack target, int amount) {
+    public synchronized int takeItemFromContainer(UUID ownerId, ItemStack target, int amount) {
         if (target == null || target.getType().isAir() || amount <= 0) return 0;
 
-        List<ItemStack> list = getOrLoad(ownerId);
+        List<ItemStack> list = getOrCreate(ownerId);
         int remaining = amount;
 
         for (Iterator<ItemStack> it = list.iterator(); it.hasNext();) {
@@ -109,7 +122,7 @@ public class ContainerManager {
         }
 
         int removed = amount - remaining;
-        if (removed > 0) save(ownerId, list);
+        if (removed > 0) markDirty(ownerId);
         return removed;
     }
 
@@ -117,12 +130,12 @@ public class ContainerManager {
         return getAllItemFromContainer(player.getUniqueId());
     }
 
-    public List<ItemStack> getAllItemFromContainer(UUID ownerId) {
-        return Collections.unmodifiableList(cloneItems(getOrLoad(ownerId)));
+    public synchronized List<ItemStack> getAllItemFromContainer(UUID ownerId) {
+        return Collections.unmodifiableList(cloneItems(getOrCreate(ownerId)));
     }
 
-    public boolean itemInContainer(Player player, ItemStack item) {
-        List<ItemStack> list = getOrLoad(player.getUniqueId());
+    public synchronized boolean itemInContainer(Player player, ItemStack item) {
+        List<ItemStack> list = getOrCreate(player.getUniqueId());
         return list.stream().anyMatch(s -> ItemUtils.isSameItemWithNBT(s, item));
     }
 
@@ -130,90 +143,67 @@ public class ContainerManager {
         clearContainer(player.getUniqueId());
     }
 
-    public void clearContainer(UUID ownerId) {
+    public synchronized void clearContainer(UUID ownerId) {
         cache.put(ownerId, new ArrayList<>());
-        queueSave(ownerId);
+        markDirty(ownerId);
     }
 
     public void clearCacheFor(UUID playerId) {
-        cache.remove(playerId);
+        // Containers are loaded once and kept in memory so delayed saves cannot lose dirty data.
     }
 
     public void flushAllSync() {
-        for (Map.Entry<UUID, List<ItemStack>> entry : cache.entrySet()) {
-            saveToDisk(entry.getKey(), cloneItems(entry.getValue()));
+        if (autoSaveTask != null) autoSaveTask.cancel();
+        flushSync();
+        storage.close();
+    }
+
+    public void flushSync() {
+        synchronized (saveLock) {
+            flushDirtySync();
         }
     }
 
-    private List<ItemStack> getOrLoad(UUID id) {
-        if (cache.containsKey(id)) return cache.get(id);
-
-        List<ItemStack> list = loadFromDisk(id);
-        cache.put(id, list);
-        return list;
+    private synchronized List<ItemStack> getOrCreate(UUID id) {
+        return cache.computeIfAbsent(id, ignored -> new ArrayList<>());
     }
 
-    private void save(UUID id, List<ItemStack> list) {
-        cache.put(id, cloneItems(list));
-        queueSave(id);
+    private synchronized void markDirty(UUID id) {
+        dirty.add(id);
     }
 
-    private void queueSave(UUID id) {
-        List<ItemStack> snapshot = cloneItems(cache.getOrDefault(id, new ArrayList<>()));
-
-        synchronized (saving) {
-            if (saving.contains(id)) {
-                saveAgain.add(id);
-                return;
+    private void flushDirtySync() {
+        synchronized (saveLock) {
+            Map<UUID, List<ItemStack>> snapshots = drainDirtySnapshots();
+            for (Map.Entry<UUID, List<ItemStack>> entry : snapshots.entrySet()) {
+                storage.save(entry.getKey(), entry.getValue());
             }
-            saving.add(id);
-        }
-
-        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            saveToDisk(id, snapshot);
-
-            boolean repeat;
-            synchronized (saving) {
-                repeat = saveAgain.remove(id);
-                saving.remove(id);
-            }
-
-            if (repeat && plugin.isEnabled()) {
-                Bukkit.getScheduler().runTask(plugin, () -> queueSave(id));
-            }
-        });
-    }
-
-    private void saveToDisk(UUID id, List<ItemStack> list) {
-        File file = new File(plugin.getPlayerDataFolder(), id + ".json");
-        try (FileOutputStream fos = new FileOutputStream(file)) {
-            String base64 = ItemUtils.itemsToBase64(list);
-            Map<String, String> wrapper = new HashMap<>();
-            wrapper.put("items_base64", base64);
-            String json = plugin.getGson().toJson(wrapper);
-            fos.write(json.getBytes(StandardCharsets.UTF_8));
-        } catch (IOException e) {
-            plugin.getLogger().severe("Failed to save container for " + id + ": " + e.getMessage());
         }
     }
 
-    private List<ItemStack> loadFromDisk(UUID id) {
-        File file = new File(plugin.getPlayerDataFolder(), id + ".json");
-        if (!file.exists()) return new ArrayList<>();
-
-        try {
-            String json = Files.readString(file.toPath(), StandardCharsets.UTF_8);
-            Map<String, String> wrapper = plugin.getGson().fromJson(json, Map.class);
-            if (wrapper == null) return new ArrayList<>();
-
-            String base64 = wrapper.get("items_base64");
-            if (base64 == null || base64.isEmpty()) return new ArrayList<>();
-
-            return ItemUtils.itemsFromBase64(base64);
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load container for " + id + ": " + e.getMessage());
-            return new ArrayList<>();
+    private synchronized Map<UUID, List<ItemStack>> drainDirtySnapshots() {
+        Map<UUID, List<ItemStack>> snapshots = new HashMap<>();
+        for (UUID ownerId : dirty) {
+            snapshots.put(ownerId, cloneItems(cache.getOrDefault(ownerId, new ArrayList<>())));
         }
+        dirty.clear();
+        return snapshots;
+    }
+
+    private ContainerStorage createStorage(VContainer plugin) {
+        StorageSettings settings = StorageSettings.from(plugin);
+        if (settings.type() == StorageSettings.StorageType.LOCAL) {
+            return new LocalContainerStorage(plugin);
+        }
+        return new SqlContainerStorage(plugin, settings);
+    }
+
+    private Map<UUID, List<ItemStack>> cloneContainers(Map<UUID, List<ItemStack>> source) {
+        Map<UUID, List<ItemStack>> copy = new HashMap<>();
+        for (Map.Entry<UUID, List<ItemStack>> entry : source.entrySet()) {
+            copy.put(entry.getKey(), cloneItems(entry.getValue()));
+        }
+        return copy;
     }
 
     private List<ItemStack> cloneItems(List<ItemStack> items) {

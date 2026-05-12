@@ -42,3 +42,4 @@ storage-block:
   no-access: "{prefix} You are not added to this storage block."
   placed: "{prefix} Personal storage block placed."
   picked-up: "{prefix} Personal storage block picked up."
+  chunk-limit: "{prefix} You can only place {limit} personal storage blocks in this chunk."

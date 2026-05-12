@@ -9,6 +9,7 @@ import hu.vzone.vcontainer.commands.ContainerCommand;
 import hu.vzone.vcontainer.listeners.ContainerListener;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
+import hu.vzone.vcontainer.storage.StorageSettings;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.configuration.InvalidConfigurationException;
@@ -37,6 +38,8 @@ public final class VContainer extends JavaPlugin {
 
     private File messageConfigFile;
     private FileConfiguration messageConfig;
+    private File databaseConfigFile;
+    private FileConfiguration databaseConfig;
     private final Map<String, FileConfiguration> menuConfigs = new HashMap<>();
     private Gson gson;
     private File playerDataFolder;
@@ -50,17 +53,18 @@ public final class VContainer extends JavaPlugin {
 
         saveDefaultConfig();
         updateDefaultConfig();
+        createDatabaseConfig();
         createMessageConfig();
         createMenuConfigs();
 
-        playerDataFolder = new File(getDataFolder(), getConfig().getString("player-data-folder", "player_data"));
-        if (!playerDataFolder.exists() && !playerDataFolder.mkdirs()) {
+        playerDataFolder = new File(getStorageFolder(), getConfig().getString("player-data-folder", "player_data"));
+        if (isLocalStorageBackend() && !playerDataFolder.exists() && !playerDataFolder.mkdirs()) {
             getLogger().warning("Could not create player data folder: " + playerDataFolder.getAbsolutePath());
         }
 
         containerManager = new ContainerManager(this);
         storageBlockManager = new StorageBlockManager(this, containerManager);
-        api = new VContainerAPIImpl(containerManager);
+        api = new VContainerAPIImpl(this, containerManager, storageBlockManager);
 
         Bukkit.getServicesManager().register(VContainerAPI.class, api, this, ServicePriority.Normal);
 
@@ -105,6 +109,14 @@ public final class VContainer extends JavaPlugin {
         return playerDataFolder;
     }
 
+    public File getStorageFolder() {
+        return new File(getDataFolder(), "storage");
+    }
+
+    public boolean isLocalStorageBackend() {
+        return StorageSettings.from(this).type() == StorageSettings.StorageType.LOCAL;
+    }
+
     public ContainerManager getContainerManager() {
         return containerManager;
     }
@@ -119,6 +131,10 @@ public final class VContainer extends JavaPlugin {
 
     public FileConfiguration getMessageConfig() {
         return messageConfig;
+    }
+
+    public FileConfiguration getDatabaseConfig() {
+        return databaseConfig;
     }
 
     public FileConfiguration getMenuConfig(String name) {
@@ -154,6 +170,26 @@ public final class VContainer extends JavaPlugin {
             }
         } catch (IOException | InvalidConfigurationException e) {
             getLogger().severe("Failed to load messages.yml: " + e.getMessage());
+        }
+    }
+
+    private void createDatabaseConfig() {
+        databaseConfigFile = new File(getDataFolder(), "database.yml");
+        if (!databaseConfigFile.exists()) {
+            databaseConfigFile.getParentFile().mkdirs();
+            saveResource("database.yml", false);
+        }
+
+        databaseConfig = YamlConfiguration.loadConfiguration(databaseConfigFile);
+        try (InputStream stream = getResource("database.yml")) {
+            if (stream != null) {
+                YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                databaseConfig.setDefaults(defaults);
+                databaseConfig.options().copyDefaults(true);
+                databaseConfig.save(databaseConfigFile);
+            }
+        } catch (IOException e) {
+            getLogger().severe("Failed to load database.yml: " + e.getMessage());
         }
     }
 

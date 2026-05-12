@@ -52,13 +52,35 @@ container-options:
   # If true, equal items are shown as one icon with the total amount in lore.
   compact-display:
     enabled: false
-    amount-line: "&7Item stack size: &f{amount}"
-    withdraw-all-line: "&eLeft click to withdraw all"
-    withdraw-one-line: "&eRight click to withdraw 1"
+    size:
+      enable: true
+      line: "&7Item stack size: &f{amount}"
+    withdraw-all:
+      enable: true
+      line: "&eLeft click to withdraw all"
+    withdraw:
+      enable: true
+      line: "&eRight click to withdraw 1"
+    withdraw-stack:
+      enable: true
+      line: "&eMiddle click to withdraw 1 stack"
+    format:
+      - ""
+      - "&8----------"
+      - "%amount-line%"
+      - "%withdraw-all-line%"
+      - "%withdraw-one-line%"
+      - "%withdraw-stack-line%"
+      - "&8----------"
 
 storage-block:
   # How far /vcontainer set can look for a target block.
   set-target-distance: 6
+
+  personal:
+    # Maximum personal storage blocks one player can place in the same chunk.
+    # Set to 0 to prevent non-bypassed players from placing personal storage blocks.
+    chunk-limit: 4
 
   item:
     material: SCULK_SHRIEKER
@@ -81,6 +103,11 @@ storage-block:
     lines:
       - "&bVContainer"
       - "&7Right click to open"
+    personal-lines:
+      - "&bPersonal VContainer"
+      - "&7Owner: &f{owner}"
+      - "&7Right click to open"
+      - "&8Hoppers can insert items"
 
 # If true, equal items are merged together when they are added to the container.
 # If false, items added at different times stay as separate entries.
