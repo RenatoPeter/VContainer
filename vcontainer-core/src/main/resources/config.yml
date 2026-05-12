@@ -4,8 +4,11 @@
 # This file controls the player container behavior, menu defaults, storage block
 # placement rules, hopper integration, holograms, and item stacking.
 #
-# Text values support legacy color codes with '&'. Some messages and titles also
-# support plugin-specific placeholders documented next to the setting.
+# Text values support legacy color codes with '&', hex colors like &#54DAF4,
+# Bukkit section colors like §x§5§4§D§A§F§4, and MiniMessage tags like
+# <gradient:#54daf4:#545eb6>text</gradient>.
+# Some messages and titles also support plugin-specific placeholders documented
+# next to the setting.
 # ============================================================================
 
 # Main container menu title.

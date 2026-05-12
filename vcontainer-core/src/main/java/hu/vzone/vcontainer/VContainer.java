@@ -11,6 +11,9 @@ import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.storage.StorageSettings;
 import hu.vzone.vcontainer.utils.ServerVersionSupport;
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.minimessage.MiniMessage;
+import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.configuration.InvalidConfigurationException;
@@ -33,6 +36,12 @@ import java.util.Map;
 public final class VContainer extends JavaPlugin {
 
     private static final Pattern HEX_PATTERN = Pattern.compile("&#([A-Fa-f0-9]{6})");
+    private static final Pattern AMPERSAND_HEX_PATTERN = Pattern.compile("(?i)&x&([0-9a-f])&([0-9a-f])&([0-9a-f])&([0-9a-f])&([0-9a-f])&([0-9a-f])");
+    private static final Pattern SECTION_HEX_PATTERN = Pattern.compile("(?i)§x§([0-9a-f])§([0-9a-f])§([0-9a-f])§([0-9a-f])§([0-9a-f])§([0-9a-f])");
+    private static final Pattern MINI_MESSAGE_TAG_PATTERN = Pattern.compile("<[^\\s<>]+(:[^<>]*)?>");
+    private static final MiniMessage MINI_MESSAGE = MiniMessage.miniMessage();
+    private static final LegacyComponentSerializer LEGACY_SECTION = LegacyComponentSerializer.legacySection();
+    private static final char STYLE_SENTINEL = '\uE000';
 
     private static VContainer instance;
     private static VContainerAPI api;
@@ -251,17 +260,82 @@ public final class VContainer extends JavaPlugin {
     }
 
     public String getPrefix() {
-        return translateHexColorCodes(ChatColor.translateAlternateColorCodes('&', getMessageConfig().getString(
+        return formatColors(getMessageConfig().getString(
                 "prefix",
-                "&#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8>&f"
-        )));
+                "<gradient:#1378FF:#60BFFB>VContainer</gradient> &8» &7"
+        ));
     }
 
     public static String formatMessage(String message) {
         if (message == null) return "";
 
         String prefix = getInstance() == null ? "" : getInstance().getPrefix();
-        return translateHexColorCodes(ChatColor.translateAlternateColorCodes('&', message.replace("{prefix}", prefix)));
+        return formatColors(message.replace("{prefix}", prefix));
+    }
+
+    private static String formatColors(String message) {
+        if (message == null) return "";
+        if (containsMiniMessageTag(message)) {
+            try {
+                Component component = MINI_MESSAGE.deserialize(legacyToMiniMessage(message) + STYLE_SENTINEL);
+                return LEGACY_SECTION.serialize(component).replace(String.valueOf(STYLE_SENTINEL), "");
+            } catch (RuntimeException ignored) {
+            }
+        }
+        return translateHexColorCodes(ChatColor.translateAlternateColorCodes('&', message));
+    }
+
+    private static boolean containsMiniMessageTag(String message) {
+        return MINI_MESSAGE_TAG_PATTERN.matcher(message).find();
+    }
+
+    private static String legacyToMiniMessage(String message) {
+        String converted = SECTION_HEX_PATTERN.matcher(message).replaceAll("<#$1$2$3$4$5$6>");
+        converted = AMPERSAND_HEX_PATTERN.matcher(converted).replaceAll("<#$1$2$3$4$5$6>");
+        converted = HEX_PATTERN.matcher(converted).replaceAll("<#$1>");
+
+        StringBuilder builder = new StringBuilder(converted.length());
+        for (int i = 0; i < converted.length(); i++) {
+            char current = converted.charAt(i);
+            if ((current == '&' || current == ChatColor.COLOR_CHAR) && i + 1 < converted.length()) {
+                String tag = legacyCodeToMiniMessageTag(Character.toLowerCase(converted.charAt(i + 1)));
+                if (tag != null) {
+                    builder.append(tag);
+                    i++;
+                    continue;
+                }
+            }
+            builder.append(current);
+        }
+        return builder.toString();
+    }
+
+    private static String legacyCodeToMiniMessageTag(char code) {
+        return switch (code) {
+            case '0' -> "<black>";
+            case '1' -> "<dark_blue>";
+            case '2' -> "<dark_green>";
+            case '3' -> "<dark_aqua>";
+            case '4' -> "<dark_red>";
+            case '5' -> "<dark_purple>";
+            case '6' -> "<gold>";
+            case '7' -> "<gray>";
+            case '8' -> "<dark_gray>";
+            case '9' -> "<blue>";
+            case 'a' -> "<green>";
+            case 'b' -> "<aqua>";
+            case 'c' -> "<red>";
+            case 'd' -> "<light_purple>";
+            case 'e' -> "<yellow>";
+            case 'f' -> "<white>";
+            case 'k' -> "<obfuscated>";
+            case 'l' -> "<bold>";
+            case 'm' -> "<strikethrough>";
+            case 'n' -> "<underlined>";
+            case 'o' -> "<italic>";
+            case 'r' -> "<reset>";
+            default -> null;
+        };
     }
 
     private static String translateHexColorCodes(final String message) {

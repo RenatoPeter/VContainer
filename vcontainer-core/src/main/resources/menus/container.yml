@@ -4,6 +4,8 @@
 # Opened by /container, admin container views, global storage blocks, and
 # personal storage blocks.
 #
+# Text values support legacy colors, hex colors, and MiniMessage tags.
+#
 # Important action keys:
 # - container-item   = stored item paging area size
 # - decoration       = static filler/decorative item

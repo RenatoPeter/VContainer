@@ -3,6 +3,8 @@
 # ----------------------------------------------------------------------------
 # Opened from a personal storage block by its owner.
 #
+# Text values support legacy colors, hex colors, and MiniMessage tags.
+#
 # Important action keys:
 # - member-toggle = one repeated entry per online player
 # - decoration    = static filler/decorative item

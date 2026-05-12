@@ -1,12 +1,14 @@
 # ============================================================================
 # VContainer messages
 # ----------------------------------------------------------------------------
-# Text values support legacy color codes with '&' and hex colors like &#1898FF.
+# Text values support legacy color codes with '&', hex colors like &#1898FF,
+# Bukkit section colors like §x§1§8§9§8§F§F, and MiniMessage tags like
+# <gradient:#54daf4:#545eb6>text</gradient>.
 # The {prefix} placeholder inserts the prefix configured below.
 # ============================================================================
 
 # Prefix inserted into messages that use the {prefix} placeholder.
-prefix: "&#1898FFV&#1898FFC&#1898FFo&#1898FFn&#1898FFt&#1898FFa&#12A2FFi&#0CADFFn&#06B7FFe&#00C1FFr &8>&f"
+prefix: "<gradient:#1378FF:#60BFFB>VContainer</gradient> &8» &7"
 
 # Messages used while players interact with containers.
 container:
