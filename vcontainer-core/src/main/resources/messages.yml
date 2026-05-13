@@ -8,7 +8,7 @@
 # ============================================================================
 
 # Prefix inserted into messages that use the {prefix} placeholder.
-prefix: "<gradient:#1378FF:#60BFFB>VContainer</gradient> &8» &7"
+prefix: "<gradient:#1378FF:#60BFFB>VContainer</gradient> &8»&7"
 
 # Messages used while players interact with containers.
 container:
@@ -18,6 +18,8 @@ container:
   take: "{prefix} You took {amount} of {item} out of the container."
   # Sent when a withdraw action cannot fit into the player's inventory.
   inventory-full: "{prefix} Your inventory is full."
+  # Sent when an item is rejected by storage limits or item blacklist settings.
+  deposit-blocked: "{prefix} This item cannot be stored here."
 
 # General player command messages.
 command:
@@ -25,6 +27,8 @@ command:
   only-players-can-use: "{prefix} Only players can use this command!"
   # Sent when a player lacks the base permission. Permission: vcontainer.use
   no-permission: "{prefix} You don't have any permission!"
+  # Sent after a live backup import locks VContainer until restart.
+  restart-required: "{prefix} VContainer is waiting for a server restart."
 
 # Admin command messages.
 admin-command:
@@ -38,6 +42,10 @@ admin-command:
     - "&f/vcontainer give <minecraft/or supported plugin> [player] [amount] &8- &7Put a specific item to container"
     - "&f/vcontainer give-block [player] [amount] -s &8- &7Give personal storage block item"
     - "&f/vcontainer set &8- &7Create a storage block from the block you are looking at"
+    - "&f/vcontainer blocks <list|tp|info|remove|owner|members> &8- &7Manage placed storage blocks"
+    - "&f/vcontainer backup <export|import> [name/file] &8- &7Export or import plugin data"
+    - "&f/vcontainer migrate [dry-run] <LOCAL|MYSQL|MARIADB|H2> &8- &7Copy loaded data to another backend"
+    - "&f/vcontainer repair <scan|export> [current|local|sql] &8- &7Find corrupt storage entries"
     - "&f/vcontainer reload &8- &7Reload the plugin"
   # Sent after the plugin reloads successfully.
   reload: "{prefix} Plugin successfully reloaded!"

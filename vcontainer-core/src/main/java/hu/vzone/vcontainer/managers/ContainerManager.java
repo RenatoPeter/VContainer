@@ -2,11 +2,13 @@ package hu.vzone.vcontainer.managers;
 
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.api.events.ContainerAddItemEvent;
+import hu.vzone.vcontainer.api.events.ContainerWithdrawItemEvent;
 import hu.vzone.vcontainer.storage.ContainerStorage;
 import hu.vzone.vcontainer.storage.LocalContainerStorage;
 import hu.vzone.vcontainer.storage.SqlContainerStorage;
 import hu.vzone.vcontainer.storage.StorageSettings;
 import hu.vzone.vcontainer.utils.ItemUtils;
+import hu.vzone.vcontainer.utils.StoragePolicy;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
@@ -15,11 +17,9 @@ import org.bukkit.scheduler.BukkitTask;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.UUID;
 
 public class ContainerManager {
@@ -28,9 +28,11 @@ public class ContainerManager {
     private final VContainer plugin;
     private final ContainerStorage storage;
     private final Map<UUID, List<ItemStack>> cache = new HashMap<>();
-    private final Set<UUID> dirty = new HashSet<>();
+    private final Map<UUID, Long> dirtyVersions = new HashMap<>();
     private final Object saveLock = new Object();
+    private long mutationVersion;
     private BukkitTask autoSaveTask;
+    private volatile boolean persistenceSuspended;
 
     public ContainerManager(VContainer plugin) {
         this.plugin = plugin;
@@ -45,26 +47,33 @@ public class ContainerManager {
         plugin.getLogger().info("Loaded " + cache.size() + " cached container(s) from " + StorageSettings.from(plugin).type() + " storage.");
     }
 
-    public void addItemToContainer(Player player, ItemStack item) {
-        addItemToContainer(player.getUniqueId(), player, item);
+    public int addItemToContainer(Player player, ItemStack item) {
+        return addItemToContainer(player.getUniqueId(), player, item);
     }
 
-    public void addItemToContainer(UUID ownerId, Player actor, ItemStack item) {
-        if (item == null || item.getType().isAir() || item.getAmount() <= 0) return;
+    public int addItemToContainer(UUID ownerId, Player actor, ItemStack item) {
+        if (item == null || item.getType().isAir() || item.getAmount() <= 0) return 0;
 
         ContainerAddItemEvent event = new ContainerAddItemEvent(actor, item);
         Bukkit.getPluginManager().callEvent(event);
-        if (event.isCancelled()) return;
+        if (event.isCancelled()) return 0;
 
-        addItemToContainer(ownerId, item);
+        return addItemToContainer(ownerId, item);
     }
 
-    public synchronized void addItemToContainer(UUID ownerId, ItemStack item) {
-        if (item == null || item.getType().isAir() || item.getAmount() <= 0) return;
+    public synchronized int addItemToContainer(UUID ownerId, ItemStack item) {
+        if (item == null || item.getType().isAir() || item.getAmount() <= 0) return 0;
 
         List<ItemStack> list = getOrCreate(ownerId);
+        StoragePolicy.Result policy = StoragePolicy.canAdd(plugin, list, item);
+        if (!policy.allowed()) {
+            plugin.getLogger().fine("Blocked container item add for " + ownerId + ": " + policy.reason());
+            return 0;
+        }
+
         boolean stackEnabled = plugin.getConfig().getBoolean("stack", true);
         int maxStack = Math.max(1, plugin.getConfig().getInt("max-stack", 64));
+        int added = 0;
 
         if (stackEnabled) {
             int amountToAdd = item.getAmount();
@@ -76,6 +85,7 @@ public class ContainerManager {
                         int add = Math.min(space, amountToAdd);
                         current.setAmount(current.getAmount() + add);
                         amountToAdd -= add;
+                        added += add;
                     }
                     if (amountToAdd <= 0) break;
                 }
@@ -87,12 +97,15 @@ public class ContainerManager {
                 newStack.setAmount(split);
                 list.add(newStack);
                 amountToAdd -= split;
+                added += split;
             }
         } else {
             list.add(item.clone());
+            added = item.getAmount();
         }
 
-        markDirty(ownerId);
+        if (added > 0) markDirty(ownerId);
+        return added;
     }
 
     public void removeItemFromContainer(Player player, ItemStack target) {
@@ -103,9 +116,17 @@ public class ContainerManager {
         takeItemFromContainer(ownerId, target, target == null ? 0 : target.getAmount());
     }
 
-    public synchronized int takeItemFromContainer(UUID ownerId, ItemStack target, int amount) {
+    public int takeItemFromContainer(UUID ownerId, ItemStack target, int amount) {
         if (target == null || target.getType().isAir() || amount <= 0) return 0;
 
+        ContainerWithdrawItemEvent event = new ContainerWithdrawItemEvent(ownerId, target, amount);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) return 0;
+
+        return takeItemFromContainerLocked(ownerId, target, amount);
+    }
+
+    private synchronized int takeItemFromContainerLocked(UUID ownerId, ItemStack target, int amount) {
         List<ItemStack> list = getOrCreate(ownerId);
         int remaining = amount;
 
@@ -134,6 +155,10 @@ public class ContainerManager {
         return Collections.unmodifiableList(cloneItems(getOrCreate(ownerId)));
     }
 
+    public synchronized Map<UUID, List<ItemStack>> snapshotContainers() {
+        return cloneContainers(cache);
+    }
+
     public synchronized boolean itemInContainer(Player player, ItemStack item) {
         List<ItemStack> list = getOrCreate(player.getUniqueId());
         return list.stream().anyMatch(s -> ItemUtils.isSameItemWithNBT(s, item));
@@ -154,14 +179,27 @@ public class ContainerManager {
 
     public void flushAllSync() {
         if (autoSaveTask != null) autoSaveTask.cancel();
-        flushSync();
+        if (!persistenceSuspended) flushSync();
         storage.close();
     }
 
     public void flushSync() {
+        if (persistenceSuspended) return;
         synchronized (saveLock) {
             flushDirtySync();
         }
+    }
+
+    public void setPersistenceSuspended(boolean suspended) {
+        persistenceSuspended = suspended;
+    }
+
+    public boolean isPersistenceSuspended() {
+        return persistenceSuspended;
+    }
+
+    public synchronized int dirtyCount() {
+        return dirtyVersions.size();
     }
 
     private synchronized List<ItemStack> getOrCreate(UUID id) {
@@ -169,25 +207,36 @@ public class ContainerManager {
     }
 
     private synchronized void markDirty(UUID id) {
-        dirty.add(id);
+        dirtyVersions.put(id, ++mutationVersion);
     }
 
     private void flushDirtySync() {
         synchronized (saveLock) {
-            Map<UUID, List<ItemStack>> snapshots = drainDirtySnapshots();
-            for (Map.Entry<UUID, List<ItemStack>> entry : snapshots.entrySet()) {
-                storage.save(entry.getKey(), entry.getValue());
+            Map<UUID, DirtyContainerSnapshot> snapshots = dirtySnapshots();
+            for (Map.Entry<UUID, DirtyContainerSnapshot> entry : snapshots.entrySet()) {
+                if (storage.save(entry.getKey(), entry.getValue().items())) {
+                    markSaved(entry.getKey(), entry.getValue().version());
+                }
             }
         }
     }
 
-    private synchronized Map<UUID, List<ItemStack>> drainDirtySnapshots() {
-        Map<UUID, List<ItemStack>> snapshots = new HashMap<>();
-        for (UUID ownerId : dirty) {
-            snapshots.put(ownerId, cloneItems(cache.getOrDefault(ownerId, new ArrayList<>())));
+    private synchronized Map<UUID, DirtyContainerSnapshot> dirtySnapshots() {
+        Map<UUID, DirtyContainerSnapshot> snapshots = new HashMap<>();
+        for (Map.Entry<UUID, Long> entry : dirtyVersions.entrySet()) {
+            snapshots.put(entry.getKey(), new DirtyContainerSnapshot(
+                    cloneItems(cache.getOrDefault(entry.getKey(), new ArrayList<>())),
+                    entry.getValue()
+            ));
         }
-        dirty.clear();
         return snapshots;
+    }
+
+    private synchronized void markSaved(UUID ownerId, long savedVersion) {
+        Long currentVersion = dirtyVersions.get(ownerId);
+        if (currentVersion != null && currentVersion == savedVersion) {
+            dirtyVersions.remove(ownerId);
+        }
     }
 
     private ContainerStorage createStorage(VContainer plugin) {
@@ -214,5 +263,8 @@ public class ContainerManager {
             }
         }
         return copy;
+    }
+
+    private record DirtyContainerSnapshot(List<ItemStack> items, long version) {
     }
 }

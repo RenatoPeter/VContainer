@@ -8,6 +8,7 @@ softdepend:
   - MythicMobs
   - ItemsAdder
   - HeadDatabase
+  - PlaceholderAPI
 
 commands:
   container:
@@ -15,7 +16,7 @@ commands:
     usage: /container
   vcontainer:
     description: Admin container command
-    usage: /vcontainer <open|clear|give|give-block|set|reload>
+    usage: /vcontainer <open|clear|give|give-block|set|blocks|backup|migrate|repair|reload>
 
 permissions:
   vcontainer.use:
@@ -24,8 +25,50 @@ permissions:
   vcontainer.admin:
     description: Allows using VContainer admin commands
     default: op
+    children:
+      vcontainer.admin.reload: true
+      vcontainer.admin.backup: true
+      vcontainer.admin.migrate: true
+      vcontainer.admin.repair: true
+      vcontainer.admin.clear: true
+      vcontainer.admin.give: true
+      vcontainer.admin.set: true
+      vcontainer.admin.blocks.tp: true
+      vcontainer.admin.blocks.remove: true
+      vcontainer.admin.blocks.owner: true
+      vcontainer.admin.blocks.members: true
+  vcontainer.admin.reload:
+    description: Allows reloading VContainer configuration
+    default: op
+  vcontainer.admin.backup:
+    description: Allows exporting and importing VContainer backups
+    default: op
+  vcontainer.admin.migrate:
+    description: Allows migrating VContainer storage data
+    default: op
+  vcontainer.admin.repair:
+    description: Allows scanning and exporting corrupt storage data
+    default: op
+  vcontainer.admin.clear:
+    description: Allows clearing player containers
+    default: op
+  vcontainer.admin.give:
+    description: Allows giving items or personal block items through admin commands
+    default: op
   vcontainer.admin.set:
     description: Allows creating storage blocks with /vcontainer set
+    default: op
+  vcontainer.admin.blocks.tp:
+    description: Allows teleporting to registered storage blocks
+    default: op
+  vcontainer.admin.blocks.remove:
+    description: Allows removing registered storage blocks
+    default: op
+  vcontainer.admin.blocks.owner:
+    description: Allows changing personal storage block owners
+    default: op
+  vcontainer.admin.blocks.members:
+    description: Allows managing personal storage block members
     default: op
   vcontainer.block.use:
     description: Allows opening containers from storage blocks

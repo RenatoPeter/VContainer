@@ -5,9 +5,11 @@ import org.bukkit.block.Block;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.Collection;
+import java.io.File;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public interface VContainerAPI {
     void addItem(Player player, ItemStack item);
@@ -38,6 +40,12 @@ public interface VContainerAPI {
 
     void flush();
 
+    int getDirtyContainerCount();
+
+    int getDirtyStorageBlockSaveCount();
+
+    int getDirtyStorageBlockDeleteCount();
+
     ItemStack createPersonalStorageBlockItem(int amount);
 
     boolean isPersonalStorageBlockItem(ItemStack item);
@@ -49,6 +57,8 @@ public interface VContainerAPI {
     boolean removeGlobalStorageBlock(Block block);
 
     boolean removePersonalStorageBlock(String storageKey, boolean keepBlock);
+
+    boolean removeStorageBlock(String storageKey, boolean keepBlock, String reason);
 
     boolean isStorageBlock(Block block);
 
@@ -76,9 +86,23 @@ public interface VContainerAPI {
 
     boolean setStorageBlockMember(String storageKey, UUID memberId, boolean member);
 
+    boolean setStorageBlockOwner(String storageKey, UUID ownerId, String ownerName);
+
+    void refreshHopperLinks(Block storageBlock);
+
     String getStorageBlockKey(Block block);
 
     String getStorageBackendType();
 
     boolean isLocalStorageBackend();
+
+    boolean isRestartRequired();
+
+    String getRestartReason();
+
+    void audit(String action, String target, String detail);
+
+    CompletableFuture<File> exportBackup(String name);
+
+    CompletableFuture<Void> migrate(String targetType);
 }

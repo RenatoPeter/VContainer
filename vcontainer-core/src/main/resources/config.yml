@@ -154,6 +154,9 @@ storage-block:
     output: true
     # How often hopper transfers are processed, in server ticks.
     interval-ticks: 8
+    # Maximum personal storage blocks scanned per hopper tick.
+    # Higher values react faster, lower values reduce per-tick server cost.
+    blocks-per-tick: 64
 
   # Text display hologram settings for storage blocks.
   hologram:
@@ -183,3 +186,40 @@ stack: true
 
 # Maximum stack size used while adding items when stack is enabled.
 max-stack: 64
+
+# Per-player storage quota and item blocking rules.
+storage-limits:
+  # Master toggle for all limits in this section.
+  enabled: false
+  # Maximum total item amount a player can store. Use -1 to disable.
+  max-total-items: -1
+  # Maximum unique item variants a player can store. Use -1 to disable.
+  max-unique-items: -1
+  # Bukkit material names that cannot be stored.
+  blocked-materials: []
+  # If true, any item with ItemMeta/NBT is blocked from storage.
+  block-items-with-nbt: false
+  # PersistentDataContainer keys that cannot be stored.
+  # Format: namespace:key
+  blocked-persistent-data-keys: []
+
+# Player head rendering settings used by menus that show player skulls.
+player-heads:
+  # Optional base64 texture used when the server cannot provide a real player
+  # texture, for example on offline/cracked setups or some skin plugin setups.
+  # Leave empty to show Minecraft's default player head in that case.
+  fallback-texture: ""
+
+# Audit log for sensitive actions such as admin changes, item movement, and storage block changes.
+audit:
+  # If true, VContainer writes audit entries to the configured file.
+  enabled: true
+  # If true, hopper input/output transfers are included in the audit log.
+  # This can produce a lot of entries on busy servers.
+  hopper: false
+  # Maximum number of queued audit lines written per async batch.
+  batch-size: 256
+  # Audit log rotation threshold in bytes. Set to 0 to disable rotation.
+  max-file-size-bytes: 10485760
+  # File path relative to plugins/VContainer.
+  file: audit.log

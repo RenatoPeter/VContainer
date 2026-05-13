@@ -1,7 +1,5 @@
 package hu.vzone.vcontainer.gui;
 
-import com.destroystokyo.paper.profile.PlayerProfile;
-import com.destroystokyo.paper.profile.ProfileProperty;
 import dev.triumphteam.gui.builder.item.ItemBuilder;
 import dev.triumphteam.gui.guis.Gui;
 import dev.triumphteam.gui.guis.GuiItem;
@@ -11,8 +9,10 @@ import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageBlock;
 import hu.vzone.vcontainer.utils.ConfigItemBuilder;
+import hu.vzone.vcontainer.utils.AuditLogger;
 import hu.vzone.vcontainer.utils.ItemUtils;
 import hu.vzone.vcontainer.utils.PermissionUtils;
+import hu.vzone.vcontainer.utils.SkinProvider;
 import hu.vzone.vcontainer.utils.StorageBlockItem;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
@@ -120,6 +120,9 @@ public class ContainerGUI {
 
             if (event.getClick().isShiftClick() && shiftDepositAll) {
                 int deposited = depositInventory(player, ownerId, manager, plugin);
+                if (deposited > 0) {
+                    AuditLogger.log("container-deposit-bulk", player, ownerId.toString(), "amount=" + deposited);
+                }
                 if (deposited > 0 && depositMessages) {
                     sendItemMessage(player, "container.deposit", "{prefix} You put {amount} of {item} into the container.", deposited, "items", ownerName);
                 }
@@ -134,15 +137,21 @@ public class ContainerGUI {
             ItemStack toDeposit = clicked.clone();
             toDeposit.setAmount(amount);
 
-            manager.addItemToContainer(ownerId, toDeposit);
+            int added = manager.addItemToContainer(ownerId, toDeposit);
+            if (added <= 0) {
+                send(player, "container.deposit-blocked", "{prefix} This item cannot be stored here.");
+                Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+                return;
+            }
+            AuditLogger.log("container-deposit", player, ownerId.toString(), "amount=" + added + " item=" + getItemName(toDeposit));
             if (depositMessages) {
-                sendItemMessage(player, "container.deposit", "{prefix} You put {amount} of {item} into the container.", amount, getItemName(toDeposit), ownerName);
+                sendItemMessage(player, "container.deposit", "{prefix} You put {amount} of {item} into the container.", added, getItemName(toDeposit), ownerName);
             }
 
-            if (clicked.getAmount() <= amount) {
+            if (clicked.getAmount() <= added) {
                 event.getClickedInventory().setItem(event.getSlot(), null);
             } else {
-                clicked.setAmount(clicked.getAmount() - amount);
+                clicked.setAmount(clicked.getAmount() - added);
                 event.getClickedInventory().setItem(event.getSlot(), clicked);
             }
 
@@ -205,6 +214,7 @@ public class ContainerGUI {
                 ItemStack toGive = target.clone();
                 toGive.setAmount(taken);
                 player.getInventory().addItem(toGive);
+                AuditLogger.log("container-withdraw", player, ownerId.toString(), "amount=" + taken + " item=" + getItemName(toGive));
 
                 if (withdrawMessages) {
                     sendItemMessage(player, "container.take", "{prefix} You took {amount} of {item} out of the container.", taken, getItemName(toGive), ownerName);
@@ -302,9 +312,15 @@ public class ContainerGUI {
             ItemStack item = storage[i];
             if (item == null || item.getType().isAir()) continue;
 
-            manager.addItemToContainer(ownerId, item.clone());
-            deposited += item.getAmount();
-            storage[i] = null;
+            int added = manager.addItemToContainer(ownerId, item.clone());
+            if (added <= 0) continue;
+            deposited += added;
+            if (item.getAmount() <= added) {
+                storage[i] = null;
+            } else {
+                item.setAmount(item.getAmount() - added);
+                storage[i] = item;
+            }
         }
         inventory.setStorageContents(storage);
 
@@ -315,9 +331,16 @@ public class ContainerGUI {
         if (plugin.getConfig().getBoolean("container-options.shift-transfer.include-offhand", false)) {
             ItemStack offhand = inventory.getItemInOffHand();
             if (offhand != null && !offhand.getType().isAir()) {
-                manager.addItemToContainer(ownerId, offhand.clone());
-                deposited += offhand.getAmount();
-                inventory.setItemInOffHand(null);
+                int added = manager.addItemToContainer(ownerId, offhand.clone());
+                if (added > 0) {
+                    deposited += added;
+                    if (offhand.getAmount() <= added) {
+                        inventory.setItemInOffHand(null);
+                    } else {
+                        offhand.setAmount(offhand.getAmount() - added);
+                        inventory.setItemInOffHand(offhand);
+                    }
+                }
             }
         }
         return deposited;
@@ -330,9 +353,15 @@ public class ContainerGUI {
             ItemStack item = armor[i];
             if (item == null || item.getType().isAir()) continue;
 
-            manager.addItemToContainer(ownerId, item.clone());
-            deposited += item.getAmount();
-            armor[i] = null;
+            int added = manager.addItemToContainer(ownerId, item.clone());
+            if (added <= 0) continue;
+            deposited += added;
+            if (item.getAmount() <= added) {
+                armor[i] = null;
+            } else {
+                item.setAmount(item.getAmount() - added);
+                armor[i] = item;
+            }
         }
         inventory.setArmorContents(armor);
         return deposited;
@@ -407,12 +436,15 @@ public class ContainerGUI {
             if (!(event.getWhoClicked() instanceof Player player)) return;
             if (!storageBlockManager.isOwner(player, storageBlockManager.get(storageKey))) return;
 
-            storageBlockManager.removePersonal(storageKey, false);
-            for (ItemStack leftover : player.getInventory().addItem(StorageBlockItem.build(plugin, 1)).values()) {
-                player.getWorld().dropItemNaturally(player.getLocation(), leftover);
-            }
-            player.closeInventory();
-            player.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString("storage-block.picked-up", "{prefix} Personal storage block picked up.")));
+            ConfirmGUI.open(player, "&0Confirm block pickup", () -> {
+                storageBlockManager.removePersonal(storageKey, false);
+                AuditLogger.log("personal-block-pickup", player, storageKey, "owner=" + ownerName);
+                for (ItemStack leftover : player.getInventory().addItem(StorageBlockItem.build(plugin, 1)).values()) {
+                    player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+                }
+                player.closeInventory();
+                player.sendMessage(VContainer.formatMessage(player, plugin.getMessageConfig().getString("storage-block.picked-up", "{prefix} Personal storage block picked up.")));
+            });
         }));
 
         gui.setItem(itemSlot(plugin, "container", "storage-members", MEMBERS_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "storage-members", viewer)).asGuiItem(event -> {
@@ -536,10 +568,10 @@ public class ContainerGUI {
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             applyHeadOwner(meta, section, player);
-            meta.setDisplayName(VContainer.formatMessage(replacePlayerPlaceholders(name, player)));
+            meta.setDisplayName(VContainer.formatMessage(player, replacePlayerPlaceholders(name, player)));
             List<String> lore = new ArrayList<>();
             for (String line : loreRaw) {
-                lore.add(VContainer.formatMessage(replacePlayerPlaceholders(line, player)));
+                lore.add(VContainer.formatMessage(player, replacePlayerPlaceholders(line, player)));
             }
             meta.setLore(lore);
             meta.addItemFlags(ItemFlag.HIDE_ATTRIBUTES, ItemFlag.HIDE_ENCHANTS, ItemFlag.HIDE_UNBREAKABLE);
@@ -559,54 +591,12 @@ public class ContainerGUI {
         if (ownerName.isEmpty()) return;
 
         if (player != null && (ownerName.equalsIgnoreCase(player.getName()) || ownerName.equals(player.getUniqueId().toString()))) {
-            applyOnlinePlayerProfile(skullMeta, player);
+            SkinProvider.apply(skullMeta, player);
             return;
         }
 
         OfflinePlayer owner = Bukkit.getOfflinePlayer(ownerName);
         skullMeta.setOwningPlayer(owner);
-    }
-
-    private static boolean applyOnlinePlayerProfile(SkullMeta skullMeta, Player player) {
-        PlayerProfile profile = player.getPlayerProfile();
-        if (!profile.hasTextures()) {
-            copyGameProfileTextures(player, profile);
-        }
-        if (!profile.hasTextures()) return false;
-
-        skullMeta.setPlayerProfile(profile);
-        return true;
-    }
-
-    private static void copyGameProfileTextures(Player player, PlayerProfile targetProfile) {
-        try {
-            Object handle = player.getClass().getMethod("getHandle").invoke(player);
-            Object gameProfile = handle.getClass().getMethod("getGameProfile").invoke(handle);
-            Object properties = gameProfile.getClass().getMethod("getProperties").invoke(gameProfile);
-            Object textureProperties = properties.getClass().getMethod("get", Object.class).invoke(properties, "textures");
-            if (!(textureProperties instanceof Iterable<?> iterable)) return;
-
-            for (Object property : iterable) {
-                Object valueObject = invokeFirst(property, "value", "getValue");
-                if (valueObject == null) return;
-                String value = String.valueOf(valueObject);
-                Object signatureValue = invokeFirst(property, "signature", "getSignature");
-                String signature = signatureValue == null ? null : String.valueOf(signatureValue);
-                targetProfile.setProperty(new ProfileProperty("textures", value, signature));
-                return;
-            }
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-        }
-    }
-
-    private static Object invokeFirst(Object target, String... methodNames) throws ReflectiveOperationException {
-        for (String methodName : methodNames) {
-            try {
-                return target.getClass().getMethod(methodName).invoke(target);
-            } catch (NoSuchMethodException ignored) {
-            }
-        }
-        return null;
     }
 
     private static String replacePlayerPlaceholders(String text, Player player) {
@@ -878,7 +868,7 @@ public class ContainerGUI {
 
     private static void send(Player player, String path, String fallback) {
         VContainer plugin = VContainer.getInstance();
-        player.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString(path, fallback)));
+        player.sendMessage(VContainer.formatMessage(player, plugin.getMessageConfig().getString(path, fallback)));
     }
 
     private static void sendItemMessage(Player player, String path, String fallback, int amount, String itemName, String ownerName) {
@@ -886,7 +876,7 @@ public class ContainerGUI {
 
         VContainer plugin = VContainer.getInstance();
         String message = plugin.getMessageConfig().getString(path, fallback);
-        player.sendMessage(VContainer.formatMessage(message
+        player.sendMessage(VContainer.formatMessage(player, message
                 .replace("{amount}", String.valueOf(amount))
                 .replace("{item}", itemName)
                 .replace("{player}", ownerName)));

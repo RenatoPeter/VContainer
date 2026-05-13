@@ -10,13 +10,16 @@ import hu.vzone.vcontainer.listeners.ContainerListener;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.storage.StorageSettings;
+import hu.vzone.vcontainer.utils.ConfigUpdater;
+import hu.vzone.vcontainer.utils.PlaceholderHook;
 import hu.vzone.vcontainer.utils.ServerVersionSupport;
+import hu.vzone.vcontainer.utils.AuditLogger;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.configuration.InvalidConfigurationException;
+import org.bukkit.OfflinePlayer;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.event.HandlerList;
@@ -24,10 +27,6 @@ import org.bukkit.plugin.ServicePriority;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.HashMap;
@@ -50,11 +49,14 @@ public final class VContainer extends JavaPlugin {
     private FileConfiguration messageConfig;
     private File databaseConfigFile;
     private FileConfiguration databaseConfig;
+    private FileConfiguration migrationConfig;
     private final Map<String, FileConfiguration> menuConfigs = new HashMap<>();
     private Gson gson;
     private File playerDataFolder;
     private ContainerManager containerManager;
     private StorageBlockManager storageBlockManager;
+    private volatile boolean restartRequired;
+    private volatile String restartReason = "";
 
     @Override
     public void onEnable() {
@@ -66,6 +68,7 @@ public final class VContainer extends JavaPlugin {
         saveDefaultConfig();
         updateDefaultConfig();
         createDatabaseConfig();
+        createMigrationConfig();
         createMessageConfig();
         createMenuConfigs();
 
@@ -115,6 +118,7 @@ public final class VContainer extends JavaPlugin {
             Bukkit.getServicesManager().unregister(VContainerAPI.class, api);
         }
 
+        AuditLogger.shutdown();
         api = null;
         instance = null;
         getLogger().info("VContainer disabled.");
@@ -148,6 +152,22 @@ public final class VContainer extends JavaPlugin {
         return storageBlockManager;
     }
 
+    public boolean isRestartRequired() {
+        return restartRequired;
+    }
+
+    public String getRestartReason() {
+        return restartReason;
+    }
+
+    public void enterRestartRequiredMode(String reason) {
+        restartRequired = true;
+        restartReason = reason == null ? "" : reason;
+        if (containerManager != null) containerManager.setPersistenceSuspended(true);
+        if (storageBlockManager != null) storageBlockManager.setPersistenceSuspended(true);
+        getLogger().warning("VContainer is now in restart-required mode: " + restartReason);
+    }
+
     public static VContainerAPI getAPI() {
         return api;
     }
@@ -160,62 +180,33 @@ public final class VContainer extends JavaPlugin {
         return databaseConfig;
     }
 
+    public FileConfiguration getMigrationConfig() {
+        return migrationConfig;
+    }
+
     public FileConfiguration getMenuConfig(String name) {
         return menuConfigs.get(name);
     }
 
     private void updateDefaultConfig() {
-        getConfig().options().copyDefaults(true);
-        getConfig().set("container-options.sorting", null);
-        getConfig().set("buttons", null);
-        getConfig().set("player-data-folder", null);
-        saveConfig();
+        File configFile = new File(getDataFolder(), "config.yml");
+        ConfigUpdater.load(this, "config.yml", configFile);
+        reloadConfig();
     }
 
     private void createMessageConfig() {
         messageConfigFile = new File(getDataFolder(), "messages.yml");
-        if (!messageConfigFile.exists()) {
-            messageConfigFile.getParentFile().mkdirs();
-            saveResource("messages.yml", false);
-        }
-
-        messageConfig = new YamlConfiguration();
-        try {
-            messageConfig.load(messageConfigFile);
-            try (InputStream stream = getResource("messages.yml")) {
-                if (stream != null) {
-                    YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(
-                            stream,
-                            StandardCharsets.UTF_8
-                    ));
-                    messageConfig.setDefaults(defaults);
-                    messageConfig.options().copyDefaults(true);
-                    messageConfig.save(messageConfigFile);
-                }
-            }
-        } catch (IOException | InvalidConfigurationException e) {
-            getLogger().severe("Failed to load messages.yml: " + e.getMessage());
-        }
+        messageConfig = ConfigUpdater.load(this, "messages.yml", messageConfigFile);
     }
 
     private void createDatabaseConfig() {
         databaseConfigFile = new File(getDataFolder(), "database.yml");
-        if (!databaseConfigFile.exists()) {
-            databaseConfigFile.getParentFile().mkdirs();
-            saveResource("database.yml", false);
-        }
+        databaseConfig = ConfigUpdater.load(this, "database.yml", databaseConfigFile);
+    }
 
-        databaseConfig = YamlConfiguration.loadConfiguration(databaseConfigFile);
-        try (InputStream stream = getResource("database.yml")) {
-            if (stream != null) {
-                YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(stream, StandardCharsets.UTF_8));
-                databaseConfig.setDefaults(defaults);
-                databaseConfig.options().copyDefaults(true);
-                databaseConfig.save(databaseConfigFile);
-            }
-        } catch (IOException e) {
-            getLogger().severe("Failed to load database.yml: " + e.getMessage());
-        }
+    private void createMigrationConfig() {
+        File migrationConfigFile = new File(getDataFolder(), "migration.yml");
+        migrationConfig = ConfigUpdater.load(this, "migration.yml", migrationConfigFile);
     }
 
     private void createMenuConfigs() {
@@ -230,22 +221,7 @@ public final class VContainer extends JavaPlugin {
 
     private void loadMenuConfig(String name) {
         File file = new File(getDataFolder(), "menus/" + name + ".yml");
-        if (!file.exists()) {
-            file.getParentFile().mkdirs();
-            saveResource("menus/" + name + ".yml", false);
-        }
-
-        YamlConfiguration config = YamlConfiguration.loadConfiguration(file);
-        try (InputStream stream = getResource("menus/" + name + ".yml")) {
-            if (stream != null) {
-                YamlConfiguration defaults = YamlConfiguration.loadConfiguration(new InputStreamReader(stream, StandardCharsets.UTF_8));
-                config.setDefaults(defaults);
-                config.options().copyDefaults(true);
-                config.save(file);
-            }
-        } catch (IOException e) {
-            getLogger().severe("Failed to load menus/" + name + ".yml: " + e.getMessage());
-        }
+        YamlConfiguration config = ConfigUpdater.load(this, "menus/" + name + ".yml", file);
         menuConfigs.put(name, config);
     }
 
@@ -262,15 +238,21 @@ public final class VContainer extends JavaPlugin {
     public String getPrefix() {
         return formatColors(getMessageConfig().getString(
                 "prefix",
-                "<gradient:#1378FF:#60BFFB>VContainer</gradient> &8» &7"
+                "<gradient:#1378FF:#60BFFB>VContainer</gradient> &8»&7"
         ));
     }
 
     public static String formatMessage(String message) {
+        return formatMessage(null, message);
+    }
+
+    public static String formatMessage(OfflinePlayer player, String message) {
         if (message == null) return "";
 
         String prefix = getInstance() == null ? "" : getInstance().getPrefix();
-        return formatColors(message.replace("{prefix}", prefix));
+        String formatted = message.replace("{prefix}", prefix);
+        formatted = PlaceholderHook.apply(player, formatted);
+        return formatColors(formatted);
     }
 
     private static String formatColors(String message) {

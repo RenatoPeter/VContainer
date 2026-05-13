@@ -30,6 +30,10 @@ public class ContainerCommand implements CommandExecutor {
             sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.no-permission", "{prefix} You don't have any permission!")));
             return true;
         }
+        if (plugin.isRestartRequired()) {
+            sender.sendMessage(plugin.formatMessage("{prefix} VContainer is waiting for a server restart. " + plugin.getRestartReason()));
+            return true;
+        }
         ContainerGUI.openContainer(player, manager, 1);
         return true;
     }

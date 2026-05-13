@@ -9,7 +9,7 @@ import java.util.UUID;
 public interface ContainerStorage extends AutoCloseable {
     Map<UUID, List<ItemStack>> loadAll();
 
-    void save(UUID ownerId, List<ItemStack> items);
+    boolean save(UUID ownerId, List<ItemStack> items);
 
     @Override
     void close();

@@ -27,6 +27,10 @@ VContainer is a Paper Minecraft plugin that gives every player a persistent virt
 - Per-player per-chunk personal storage block limit.
 - Holograms for global and personal storage blocks.
 - Local JSON, MySQL, MariaDB, and H2 storage backends.
+- Comment-preserving config updates for newly added default settings.
+- Backup export/import and backend migration helpers.
+- Audit logging for sensitive actions and hopper movement.
+- PlaceholderAPI support for menus, messages, holograms, and configured text when PlaceholderAPI is installed.
 - Public API exposed through Bukkit `ServicesManager`.
 - Configurable item builder for GUI buttons and the personal storage block item.
 - Legacy colors, hex colors, Bukkit section hex colors, and MiniMessage gradients.
@@ -62,12 +66,24 @@ vcontainer-core/target/VContainer-1.0.0.jar
 | `/vcontainer reload` | `vcontainer.admin` | Reloads config, messages, menu configs, holograms, and hopper timing. |
 | `/vcontainer open <player>` | `vcontainer.admin` | Opens another online player's container. Player sender only. |
 | `/vcontainer clear <player>` | `vcontainer.admin` | Clears another online player's container. |
-| `/vcontainer give minecraft <item> [player] [amount]` | `vcontainer.admin` | Adds a vanilla Minecraft item to a player's virtual container. |
-| `/vcontainer give oraxen <item_id> [player] [amount]` | `vcontainer.admin` | Adds an Oraxen item if Oraxen is installed. |
-| `/vcontainer give mythicmobs <item_id> [player] [amount]` | `vcontainer.admin` | Adds a MythicMobs item if MythicMobs is installed. |
-| `/vcontainer give itemsadder <namespace:id> [player] [amount]` | `vcontainer.admin` | Adds an ItemsAdder item if ItemsAdder is installed. |
+| `/vcontainer give minecraft <item> [player] [amount]` | `vcontainer.admin.give` | Adds a vanilla Minecraft item to a player's virtual container. |
+| `/vcontainer give oraxen <item_id> [player] [amount]` | `vcontainer.admin.give` | Adds an Oraxen item if Oraxen is installed. |
+| `/vcontainer give mythicmobs <item_id> [player] [amount]` | `vcontainer.admin.give` | Adds a MythicMobs item if MythicMobs is installed. |
+| `/vcontainer give itemsadder <namespace:id> [player] [amount]` | `vcontainer.admin.give` | Adds an ItemsAdder item if ItemsAdder is installed. |
 | `/vcontainer set` | `vcontainer.admin` and `vcontainer.admin.set` | Marks the block you are looking at as a global storage block. Player sender only. |
-| `/vcontainer give-block [player] [amount] -s` | `vcontainer.admin` | Gives a personal storage block item. `player` defaults to the sender, `amount` defaults to `1`, and `-s` hides the received message from the target. |
+| `/vcontainer give-block [player] [amount] -s` | `vcontainer.admin.give` | Gives a personal storage block item. `player` defaults to the sender, `amount` defaults to `1`, and `-s` hides the received message from the target. |
+| `/vcontainer blocks list [page]` | `vcontainer.admin` | Lists registered global and personal storage blocks. |
+| `/vcontainer blocks info <key>` | `vcontainer.admin` | Shows type, owner, and member count for a storage block. |
+| `/vcontainer blocks tp <key>` | `vcontainer.admin.blocks.tp` | Teleports to a registered storage block. Player sender only. |
+| `/vcontainer blocks remove <key> [--keep-block]` | `vcontainer.admin.blocks.remove` | Removes a registered storage block. Player senders get a confirmation GUI. |
+| `/vcontainer blocks owner <key> <player>` | `vcontainer.admin.blocks.owner` | Changes the owner of a personal storage block. |
+| `/vcontainer blocks members <key> <list\|add\|remove> [player]` | `vcontainer.admin.blocks.members` | Manages personal storage block members. |
+| `/vcontainer backup export [name]` | `vcontainer.admin.backup` | Creates a zip backup in `plugins/VContainer/backups/` asynchronously. |
+| `/vcontainer backup import <file.zip>` | `vcontainer.admin.backup` | Creates a pre-import backup, imports a zip, then locks VContainer until restart. |
+| `/vcontainer migrate dry-run <LOCAL\|MYSQL\|MARIADB\|H2>` | `vcontainer.admin.migrate` | Tests the migration target and reports source/target counts without writing data. |
+| `/vcontainer migrate <LOCAL\|MYSQL\|MARIADB\|H2>` | `vcontainer.admin.migrate` | Copies currently loaded data to an empty target backend using `migration.yml`, with active-target validation. |
+| `/vcontainer repair scan [current\|local\|sql]` | `vcontainer.admin.repair` | Scans storage data for corrupt local JSON/base64 or SQL item blobs. |
+| `/vcontainer repair export [current\|local\|sql]` | `vcontainer.admin.repair` | Scans and exports corrupt entries into `plugins/VContainer/repair/`. |
 
 ## Permissions
 
@@ -75,7 +91,16 @@ vcontainer-core/target/VContainer-1.0.0.jar
 | --- | --- | --- |
 | `vcontainer.use` | `op` | Allows `/container`. |
 | `vcontainer.admin` | `op` | Allows admin commands. |
+| `vcontainer.admin.backup` | `op` | Allows `/vcontainer backup export/import`. |
+| `vcontainer.admin.migrate` | `op` | Allows `/vcontainer migrate`. |
+| `vcontainer.admin.repair` | `op` | Allows `/vcontainer repair`. |
+| `vcontainer.admin.clear` | `op` | Allows `/vcontainer clear`. |
+| `vcontainer.admin.give` | `op` | Allows `/vcontainer give` and `/vcontainer give-block`. |
 | `vcontainer.admin.set` | `op` | Allows `/vcontainer set`. |
+| `vcontainer.admin.blocks.tp` | `op` | Allows `/vcontainer blocks tp`. |
+| `vcontainer.admin.blocks.remove` | `op` | Allows `/vcontainer blocks remove`. |
+| `vcontainer.admin.blocks.owner` | `op` | Allows `/vcontainer blocks owner`. |
+| `vcontainer.admin.blocks.members` | `op` | Allows `/vcontainer blocks members`. |
 | `vcontainer.block.use` | `op` | Allows opening containers through storage blocks. |
 | `vcontainer.block.remove` | `op` | Allows removing global storage blocks by sneaking and breaking them. |
 | `vcontainer.block.limit.bypass` | `op` | Bypasses the per-chunk personal storage block limit. |
@@ -160,6 +185,7 @@ Personal storage blocks support hopper transfer.
 - Hopper output: a hopper below the personal storage block pulls items from the owner's virtual container.
 - Open container GUIs update live when hopper transfers change the contents.
 - Sneak + right-clicking a personal storage block with a hopper attempts to attach the hopper to the clicked side and face it toward the storage block.
+- Hopper links are cached per personal storage block and refreshed when relevant hoppers are placed or attached.
 
 Hopper behavior is controlled in `config.yml`:
 
@@ -170,6 +196,7 @@ storage-block:
     input: true
     output: true
     interval-ticks: 8
+    blocks-per-tick: 64
 ```
 
 ### Personal Block Chunk Limit
@@ -213,6 +240,15 @@ Important sections:
 - `container-options.compact-display.enabled`: shows one icon per equal item with total amount in lore.
 - `stack`: merges equal items when added.
 - `max-stack`: maximum stack size used by VContainer when stacking.
+- `player-heads.fallback-texture`: optional base64 skull texture used when the server cannot provide real player skin data.
+- `audit.enabled`: toggles audit logging.
+- `audit.file`: audit file path relative to `plugins/VContainer`.
+- `storage-limits.enabled`: toggles per-player storage quotas and item blocking.
+- `storage-limits.max-total-items`: maximum total amount of stored items per player.
+- `storage-limits.max-unique-items`: maximum unique item variants per player.
+- `storage-limits.blocked-materials`: Bukkit material names that cannot be stored.
+- `storage-limits.block-items-with-nbt`: blocks all items that have ItemMeta/NBT.
+- `storage-limits.blocked-persistent-data-keys`: blocks items containing specific PDC keys.
 
 Compact display lore is configurable:
 
@@ -430,6 +466,70 @@ VContainer does not write every change immediately. It keeps data in memory and 
 - every 2 minutes,
 - on plugin disable,
 - when the API `flush()` method is called.
+
+Storage block metadata uses the same dirty-cache pattern. Failed saves remain dirty and are retried later. SQL player container saves use a diff-style slot update inside a transaction instead of replacing every row.
+
+### Backup And Migration
+
+Use `/vcontainer backup export [name]` before manual maintenance. The backup is a zip of the plugin data folder, excluding existing backups.
+
+Use `/vcontainer backup import <file.zip>` to restore a backup into the plugin data folder. The plugin first creates a pre-import backup, imports the zip, suspends persistence, and locks VContainer until a server restart so the old live cache cannot overwrite imported files.
+
+Use `/vcontainer migrate dry-run <LOCAL|MYSQL|MARIADB|H2>` before every migration. It checks the target connection, active-backend mismatch, target prefix, source counts, and whether the target tables/folders are empty.
+
+Use `/vcontainer migrate <LOCAL|MYSQL|MARIADB|H2>` to copy currently loaded player containers and storage blocks to another backend. The command first creates a pre-migration backup, then writes to the selected empty target using `migration.yml`. It refuses to run when the target resolves to the currently active backend or when target data already exists.
+
+Migrations no longer clear or swap live target SQL tables. They write only to an empty target backend/prefix, which is safer for MySQL/MariaDB where DDL can implicitly commit.
+
+### Repair
+
+Use `/vcontainer repair scan [current|local|sql]` to check storage data for corrupt local JSON/base64 files or SQL item blobs.
+
+Use `/vcontainer repair export [current|local|sql]` to copy bad local files or export bad SQL row identifiers into `plugins/VContainer/repair/`.
+
+### Storage Limits
+
+Per-player quota and item blocking are controlled in `config.yml`:
+
+```yaml
+storage-limits:
+  enabled: false
+  max-total-items: -1
+  max-unique-items: -1
+  blocked-materials: []
+  block-items-with-nbt: false
+  blocked-persistent-data-keys: []
+```
+
+These limits apply to manual deposits, admin item insertion, API insertion, and hopper input.
+
+### Audit Log
+
+Audit logging is controlled in `config.yml`:
+
+```yaml
+audit:
+  enabled: true
+  hopper: false
+  batch-size: 256
+  max-file-size-bytes: 10485760
+  file: audit.log
+```
+
+Logged actions include manual deposits and withdrawals, admin item grants, container clears, storage block changes, backup/import/migration operations, and optionally hopper input/output. Audit writes are queued and flushed in batches.
+
+### PlaceholderAPI
+
+PlaceholderAPI is an optional soft dependency. When installed, placeholders are applied to supported messages, configured menu text, item lore generated through VContainer formatting, and storage block holograms. Plugin placeholders such as `{owner}`, `{amount}`, and `{item}` are still resolved by VContainer first.
+
+### Player Heads
+
+Player head buttons use a `SkinProvider` cache that reads textures from the online player profile without forcing a Mojang sessionserver lookup. On offline/cracked servers or setups where no texture exists, configure:
+
+```yaml
+player-heads:
+  fallback-texture: ""
+```
 
 ## API
 

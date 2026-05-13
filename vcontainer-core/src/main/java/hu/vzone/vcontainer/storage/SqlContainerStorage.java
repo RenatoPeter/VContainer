@@ -6,12 +6,14 @@ import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.utils.ItemUtils;
 import org.bukkit.inventory.ItemStack;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,10 +23,12 @@ public class SqlContainerStorage implements ContainerStorage {
     private final VContainer plugin;
     private final HikariDataSource dataSource;
     private final String table;
+    private final StorageSettings.StorageType type;
 
     public SqlContainerStorage(VContainer plugin, StorageSettings settings) {
         this.plugin = plugin;
         this.table = settings.prefix() + "player_data";
+        this.type = settings.type();
 
         HikariConfig config = new HikariConfig();
         config.setJdbcUrl(settings.buildJdbcUrl(plugin.getDataFolder()));
@@ -49,12 +53,18 @@ public class SqlContainerStorage implements ContainerStorage {
 
         try (Connection connection = dataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql);
-             ResultSet result = statement.executeQuery()) {
+            ResultSet result = statement.executeQuery()) {
             while (result.next()) {
-                UUID ownerId = UUID.fromString(result.getString("owner_uuid"));
-                ItemStack item = ItemUtils.fromBytes(result.getBytes("item_blob"));
-                if (item == null || item.getType().isAir()) continue;
-                containers.computeIfAbsent(ownerId, ignored -> new ArrayList<>()).add(item);
+                try {
+                    UUID ownerId = UUID.fromString(result.getString("owner_uuid"));
+                    ItemStack item = ItemUtils.fromBytes(result.getBytes("item_blob"));
+                    if (item == null || item.getType().isAir()) continue;
+                    containers.computeIfAbsent(ownerId, ignored -> new ArrayList<>()).add(item);
+                } catch (Exception rowException) {
+                    plugin.getLogger().severe("Skipping corrupt SQL container row: owner="
+                            + result.getString("owner_uuid")
+                            + " error=" + rowException.getMessage());
+                }
             }
         } catch (Exception e) {
             plugin.getLogger().severe("Failed to load SQL containers: " + e.getMessage());
@@ -64,36 +74,89 @@ public class SqlContainerStorage implements ContainerStorage {
     }
 
     @Override
-    public void save(UUID ownerId, List<ItemStack> items) {
-        String deleteSql = "DELETE FROM " + table + " WHERE owner_uuid = ?";
-        String insertSql = "INSERT INTO " + table + " (owner_uuid, slot_index, item_blob) VALUES (?, ?, ?)";
-
+    public boolean save(UUID ownerId, List<ItemStack> items) {
         try (Connection connection = dataSource.getConnection()) {
             connection.setAutoCommit(false);
 
-            try (PreparedStatement delete = connection.prepareStatement(deleteSql)) {
-                delete.setString(1, ownerId.toString());
-                delete.executeUpdate();
-            }
+            try {
+                Map<Integer, byte[]> existing = loadExisting(connection, ownerId);
+                List<byte[]> desired = serializeItems(items);
 
-            try (PreparedStatement insert = connection.prepareStatement(insertSql)) {
-                int slot = 0;
-                for (ItemStack item : items) {
-                    if (item == null || item.getType().isAir()) continue;
+                try (PreparedStatement delete = connection.prepareStatement("DELETE FROM " + table + " WHERE owner_uuid = ? AND slot_index = ?");
+                     PreparedStatement upsert = connection.prepareStatement(upsertSql())) {
+                    for (Map.Entry<Integer, byte[]> entry : existing.entrySet()) {
+                        if (entry.getKey() >= desired.size() || !Arrays.equals(entry.getValue(), desired.get(entry.getKey()))) {
+                            delete.setString(1, ownerId.toString());
+                            delete.setInt(2, entry.getKey());
+                            delete.addBatch();
+                        }
+                    }
 
-                    ItemStack snapshot = item.clone();
-                    insert.setString(1, ownerId.toString());
-                    insert.setInt(2, slot++);
-                    insert.setBytes(3, ItemUtils.toBytes(snapshot));
-                    insert.addBatch();
+                    for (int slot = 0; slot < desired.size(); slot++) {
+                        byte[] blob = desired.get(slot);
+                        if (Arrays.equals(existing.get(slot), blob)) continue;
+
+                        upsert.setString(1, ownerId.toString());
+                        upsert.setInt(2, slot);
+                        upsert.setBytes(3, blob);
+                        upsert.addBatch();
+                    }
+
+                    delete.executeBatch();
+                    upsert.executeBatch();
                 }
-                insert.executeBatch();
-            }
 
-            connection.commit();
+                connection.commit();
+                return true;
+            } catch (Exception e) {
+                try {
+                    connection.rollback();
+                } catch (SQLException rollbackException) {
+                    plugin.getLogger().severe("Failed to rollback SQL container save for " + ownerId + ": " + rollbackException.getMessage());
+                }
+                plugin.getLogger().severe("Failed to save SQL container for " + ownerId + ": " + e.getMessage());
+                return false;
+            } finally {
+                try {
+                    connection.setAutoCommit(true);
+                } catch (SQLException ignored) {
+                }
+            }
         } catch (Exception e) {
-            plugin.getLogger().severe("Failed to save SQL container for " + ownerId + ": " + e.getMessage());
+            plugin.getLogger().severe("Failed to open SQL connection for container save " + ownerId + ": " + e.getMessage());
+            return false;
         }
+    }
+
+    private String upsertSql() {
+        if (type == StorageSettings.StorageType.H2) {
+            return "MERGE INTO " + table + " (owner_uuid, slot_index, item_blob) KEY(owner_uuid, slot_index) VALUES (?, ?, ?)";
+        }
+        return "INSERT INTO " + table + " (owner_uuid, slot_index, item_blob) VALUES (?, ?, ?) "
+                + "ON DUPLICATE KEY UPDATE item_blob = VALUES(item_blob)";
+    }
+
+    private Map<Integer, byte[]> loadExisting(Connection connection, UUID ownerId) throws SQLException {
+        Map<Integer, byte[]> existing = new HashMap<>();
+        String sql = "SELECT slot_index, item_blob FROM " + table + " WHERE owner_uuid = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, ownerId.toString());
+            try (ResultSet result = statement.executeQuery()) {
+                while (result.next()) {
+                    existing.put(result.getInt("slot_index"), result.getBytes("item_blob"));
+                }
+            }
+        }
+        return existing;
+    }
+
+    private List<byte[]> serializeItems(List<ItemStack> items) throws IOException {
+        List<byte[]> serialized = new ArrayList<>();
+        for (ItemStack item : items) {
+            if (item == null || item.getType().isAir()) continue;
+            serialized.add(ItemUtils.toBytes(item.clone()));
+        }
+        return serialized;
     }
 
     private void createTable() {

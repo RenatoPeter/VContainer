@@ -1,0 +1,49 @@
+# ============================================================================
+# VContainer migration configuration
+# ----------------------------------------------------------------------------
+# Used only by /vcontainer migrate.
+# Keep target JDBC details here so a migration cannot accidentally reuse the
+# active database.yml connection and overwrite the live backend.
+# ============================================================================
+config-version: 1
+
+migration:
+  # If false, /vcontainer migrate refuses to run.
+  enabled: true
+
+  # Target profiles used by /vcontainer migrate <type>.
+  # LOCAL writes to plugins/VContainer/storage.
+  targets:
+    MYSQL:
+      Hostname: 172.168.0.1
+      Port: 3306
+      Username: minecraft
+      Password: ""
+      Database: minecraft_migrated
+      Pool Size: 5
+      Use SSL: false
+      Jdbc Url: ""
+      Driver Class: ""
+      Prefix: vcontainer_
+    MARIADB:
+      Hostname: 172.168.0.1
+      Port: 3306
+      Username: minecraft
+      Password: ""
+      Database: minecraft_migrated
+      Pool Size: 5
+      Use SSL: false
+      Jdbc Url: ""
+      Driver Class: ""
+      Prefix: vcontainer_
+    H2:
+      Hostname: 127.0.0.1
+      Port: 0
+      Username: minecraft
+      Password: ""
+      Database: vcontainer-migrated
+      Pool Size: 5
+      Use SSL: false
+      Jdbc Url: ""
+      Driver Class: ""
+      Prefix: vcontainer_

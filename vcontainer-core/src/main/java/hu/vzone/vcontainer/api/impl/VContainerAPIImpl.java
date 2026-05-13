@@ -9,17 +9,22 @@ import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageBlock;
 import hu.vzone.vcontainer.storage.StorageSettings;
+import hu.vzone.vcontainer.utils.AdminDataService;
+import hu.vzone.vcontainer.utils.AuditLogger;
 import hu.vzone.vcontainer.utils.StorageBlockItem;
+import org.bukkit.Bukkit;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 
 import java.util.Collection;
+import java.io.File;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public class VContainerAPIImpl implements VContainerAPI {
     private final VContainer plugin;
@@ -100,6 +105,22 @@ public class VContainerAPIImpl implements VContainerAPI {
     @Override
     public void flush() {
         manager.flushSync();
+        storageBlockManager.flushSync();
+    }
+
+    @Override
+    public int getDirtyContainerCount() {
+        return manager.dirtyCount();
+    }
+
+    @Override
+    public int getDirtyStorageBlockSaveCount() {
+        return storageBlockManager.dirtySaveCount();
+    }
+
+    @Override
+    public int getDirtyStorageBlockDeleteCount() {
+        return storageBlockManager.dirtyDeleteCount();
     }
 
     @Override
@@ -131,6 +152,13 @@ public class VContainerAPIImpl implements VContainerAPI {
     @Override
     public boolean removePersonalStorageBlock(String storageKey, boolean keepBlock) {
         return storageBlockManager.removePersonal(storageKey, keepBlock);
+    }
+
+    @Override
+    public boolean removeStorageBlock(String storageKey, boolean keepBlock, String reason) {
+        boolean removed = storageBlockManager.removeByKey(storageKey, keepBlock);
+        if (removed) AuditLogger.logSystem("api-storage-block-remove", storageKey, reason);
+        return removed;
     }
 
     @Override
@@ -199,6 +227,16 @@ public class VContainerAPIImpl implements VContainerAPI {
     }
 
     @Override
+    public boolean setStorageBlockOwner(String storageKey, UUID ownerId, String ownerName) {
+        return storageBlockManager.setOwner(storageKey, ownerId, ownerName);
+    }
+
+    @Override
+    public void refreshHopperLinks(Block storageBlock) {
+        storageBlockManager.refreshHopperLinks(storageBlock);
+    }
+
+    @Override
     public String getStorageBlockKey(Block block) {
         return storageBlockManager.key(block);
     }
@@ -211,6 +249,58 @@ public class VContainerAPIImpl implements VContainerAPI {
     @Override
     public boolean isLocalStorageBackend() {
         return plugin.isLocalStorageBackend();
+    }
+
+    @Override
+    public boolean isRestartRequired() {
+        return plugin.isRestartRequired();
+    }
+
+    @Override
+    public String getRestartReason() {
+        return plugin.getRestartReason();
+    }
+
+    @Override
+    public void audit(String action, String target, String detail) {
+        AuditLogger.logSystem(action, target, detail);
+    }
+
+    @Override
+    public CompletableFuture<File> exportBackup(String name) {
+        return runAsync(() -> {
+            try {
+                flush();
+                return AdminDataService.exportBackup(plugin, name);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+    }
+
+    @Override
+    public CompletableFuture<Void> migrate(String targetType) {
+        return runAsync(() -> {
+            try {
+                StorageSettings.StorageType type = StorageSettings.StorageType.valueOf(targetType.toUpperCase(java.util.Locale.ROOT));
+                AdminDataService.migrate(plugin, manager, storageBlockManager, type);
+                return null;
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+    }
+
+    private <T> CompletableFuture<T> runAsync(java.util.concurrent.Callable<T> callable) {
+        CompletableFuture<T> future = new CompletableFuture<>();
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            try {
+                future.complete(callable.call());
+            } catch (Throwable throwable) {
+                future.completeExceptionally(throwable);
+            }
+        });
+        return future;
     }
 
     private StorageBlockInfo toInfo(StorageBlock storageBlock) {

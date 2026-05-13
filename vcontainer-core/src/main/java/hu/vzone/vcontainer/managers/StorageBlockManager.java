@@ -4,8 +4,11 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.gui.ContainerGUI;
+import hu.vzone.vcontainer.api.events.StorageBlockHopperTransferEvent;
 import hu.vzone.vcontainer.storage.StorageSettings;
+import hu.vzone.vcontainer.utils.AuditLogger;
 import hu.vzone.vcontainer.utils.ItemUtils;
+import hu.vzone.vcontainer.utils.PlaceholderHook;
 import hu.vzone.vcontainer.utils.PermissionUtils;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
@@ -36,6 +39,7 @@ import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -48,6 +52,7 @@ import java.util.Set;
 import java.util.UUID;
 
 public class StorageBlockManager {
+    private static final long AUTO_SAVE_TICKS = 20L * 60L * 2L;
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacySection();
     private static final String HOLOGRAM_TAG = "vcontainer_storage_hologram";
     private static final BlockFace[] HOPPER_INPUT_FACES = {
@@ -69,7 +74,18 @@ public class StorageBlockManager {
     private final Map<String, UUID> holograms = new HashMap<>();
     private final Map<String, StorageBlock> globalBlocks = new HashMap<>();
     private final Map<String, StorageBlock> personalBlocks = new HashMap<>();
+    private final Map<String, Set<String>> personalBlocksByChunk = new HashMap<>();
+    private final Map<String, HopperLinks> hopperLinks = new HashMap<>();
+    private final Set<String> activeHopperBlocks = new HashSet<>();
+    private final List<String> activeHopperBlockKeys = new ArrayList<>();
+    private final Map<UUID, DirtyBlockSave> dirtyBlockSaves = new HashMap<>();
+    private final Map<UUID, DirtyBlockDelete> dirtyBlockDeletes = new HashMap<>();
+    private final Object blockSaveLock = new Object();
+    private long blockMutationVersion;
     private BukkitTask hopperTask;
+    private BukkitTask autoSaveTask;
+    private int hopperCursor;
+    private volatile boolean persistenceSuspended;
 
     public StorageBlockManager(VContainer plugin, ContainerManager containerManager) {
         this.plugin = plugin;
@@ -84,6 +100,7 @@ public class StorageBlockManager {
         this.personalDirectory = new File(storageDirectory, "personal_storage_blocks");
         if (!localStorage) initSqlStorage();
         load();
+        startAutoSaveTask();
         startHopperTask();
     }
 
@@ -94,7 +111,7 @@ public class StorageBlockManager {
         StorageBlock storageBlock = StorageBlock.global(UUID.randomUUID(), key);
         globalBlocks.put(key, storageBlock);
         spawnHologram(block.getLocation());
-        saveBlock(storageBlock);
+        markBlockDirty(storageBlock);
         return true;
     }
 
@@ -104,8 +121,10 @@ public class StorageBlockManager {
 
         StorageBlock storageBlock = StorageBlock.personal(UUID.randomUUID(), key, owner.getUniqueId(), owner.getName());
         personalBlocks.put(key, storageBlock);
+        registerPersonalBlock(storageBlock);
+        refreshHopperLinks(storageBlock);
         spawnHologram(block.getLocation());
-        saveBlock(storageBlock);
+        markBlockDirty(storageBlock);
         return true;
     }
 
@@ -116,13 +135,16 @@ public class StorageBlockManager {
         if (removed == null) return false;
 
         removeHologram(block.getLocation());
-        deleteBlockFile(removed);
+        markBlockDeleted(removed);
         return true;
     }
 
     public boolean removePersonal(String key, boolean keepBlock) {
         StorageBlock removed = personalBlocks.remove(key);
         if (removed == null) return false;
+        unregisterPersonalBlock(removed);
+        hopperLinks.remove(key);
+        setHopperActive(key, false);
 
         Location location = locationFromKey(key);
         if (location != null) {
@@ -132,7 +154,7 @@ public class StorageBlockManager {
             }
         }
 
-        deleteBlockFile(removed);
+        markBlockDeleted(removed);
         return true;
     }
 
@@ -150,6 +172,33 @@ public class StorageBlockManager {
     public StorageBlock get(String key) {
         StorageBlock personal = personalBlocks.get(key);
         return personal != null ? personal : globalBlocks.get(key);
+    }
+
+    public Location locationOf(String key) {
+        return locationFromKey(key);
+    }
+
+    public boolean removeByKey(String key, boolean keepBlock) {
+        StorageBlock storageBlock = get(key);
+        if (storageBlock == null) return false;
+        if (storageBlock.type() == StorageType.PERSONAL) {
+            return removePersonal(key, keepBlock);
+        }
+
+        Location location = locationFromKey(key);
+        if (location == null) return false;
+        return removeGlobal(location.getBlock());
+    }
+
+    public boolean setOwner(String key, UUID ownerId, String ownerName) {
+        StorageBlock storageBlock = personalBlocks.get(key);
+        if (storageBlock == null || ownerId == null || ownerName == null || ownerName.isBlank()) return false;
+
+        StorageBlock updated = new StorageBlock(storageBlock.id(), storageBlock.key(), storageBlock.type(), ownerId, ownerName, storageBlock.members());
+        personalBlocks.put(key, updated);
+        markBlockDirty(updated);
+        reloadHolograms();
+        return true;
     }
 
     public boolean canAccess(Player player, StorageBlock storageBlock) {
@@ -182,7 +231,7 @@ public class StorageBlockManager {
         if (!storageBlock.members().remove(player.getUniqueId())) {
             storageBlock.members().add(player.getUniqueId());
         }
-        saveBlock(storageBlock);
+        markBlockDirty(storageBlock);
     }
 
     public boolean setMember(String key, UUID memberId, boolean member) {
@@ -190,7 +239,7 @@ public class StorageBlockManager {
         if (storageBlock == null || memberId == null || storageBlock.ownerId().equals(memberId)) return false;
 
         boolean changed = member ? storageBlock.members().add(memberId) : storageBlock.members().remove(memberId);
-        if (changed) saveBlock(storageBlock);
+        if (changed) markBlockDirty(storageBlock);
         return changed;
     }
 
@@ -212,6 +261,13 @@ public class StorageBlockManager {
         return key(block.getLocation());
     }
 
+    public void refreshHopperLinks(Block storageBlock) {
+        StorageBlock block = get(storageBlock);
+        if (block != null && block.type() == StorageType.PERSONAL) {
+            refreshHopperLinks(block);
+        }
+    }
+
     private int countPersonalBlocksInChunk(Block block, UUID ownerId) {
         if (block == null || block.getWorld() == null) return 0;
 
@@ -220,17 +276,92 @@ public class StorageBlockManager {
         int chunkZ = block.getZ() >> 4;
         int count = 0;
 
-        for (StorageBlock storageBlock : personalBlocks.values()) {
-            if (!ownerId.equals(storageBlock.ownerId())) continue;
+        Set<String> chunkBlocks = personalBlocksByChunk.get(chunkKey(worldName, chunkX, chunkZ));
+        if (chunkBlocks == null || chunkBlocks.isEmpty()) return 0;
 
-            Location location = locationFromKey(storageBlock.key());
-            if (location == null || location.getWorld() == null) continue;
-            if (!location.getWorld().getName().equals(worldName)) continue;
-            if ((location.getBlockX() >> 4) == chunkX && (location.getBlockZ() >> 4) == chunkZ) {
-                count++;
-            }
+        for (String storageKey : chunkBlocks) {
+            StorageBlock storageBlock = personalBlocks.get(storageKey);
+            if (storageBlock == null) continue;
+            if (!ownerId.equals(storageBlock.ownerId())) continue;
+            count++;
         }
         return count;
+    }
+
+    private void registerPersonalBlock(StorageBlock storageBlock) {
+        String chunkKey = chunkKey(storageBlock.key());
+        if (chunkKey == null) return;
+        personalBlocksByChunk.computeIfAbsent(chunkKey, ignored -> new HashSet<>()).add(storageBlock.key());
+    }
+
+    private void unregisterPersonalBlock(StorageBlock storageBlock) {
+        String chunkKey = chunkKey(storageBlock.key());
+        if (chunkKey == null) return;
+
+        Set<String> blocks = personalBlocksByChunk.get(chunkKey);
+        if (blocks == null) return;
+        blocks.remove(storageBlock.key());
+        if (blocks.isEmpty()) {
+            personalBlocksByChunk.remove(chunkKey);
+        }
+    }
+
+    private HopperLinks refreshHopperLinks(StorageBlock storageBlock) {
+        Location location = locationFromKey(storageBlock.key());
+        if (location == null || location.getWorld() == null || !location.isChunkLoaded()) {
+            HopperLinks empty = new HopperLinks(List.of(), null);
+            hopperLinks.put(storageBlock.key(), empty);
+            return empty;
+        }
+
+        List<String> inputKeys = new ArrayList<>();
+        Block storageBlockBlock = location.getBlock();
+        for (BlockFace face : HOPPER_INPUT_FACES) {
+            Block hopperBlock = storageBlockBlock.getRelative(face);
+            if (isInputHopper(hopperBlock, storageBlockBlock)) {
+                inputKeys.add(key(hopperBlock.getLocation()));
+            }
+        }
+
+        Block outputHopper = storageBlockBlock.getRelative(BlockFace.DOWN);
+        String outputKey = outputHopper.getType() == Material.HOPPER ? key(outputHopper.getLocation()) : null;
+        HopperLinks links = new HopperLinks(inputKeys, outputKey);
+        hopperLinks.put(storageBlock.key(), links);
+        setHopperActive(storageBlock.key(), links.hasAny());
+        return links;
+    }
+
+    private void setHopperActive(String key, boolean active) {
+        if (active) {
+            if (activeHopperBlocks.add(key)) {
+                activeHopperBlockKeys.add(key);
+            }
+            return;
+        }
+
+        if (activeHopperBlocks.remove(key)) {
+            activeHopperBlockKeys.remove(key);
+            if (hopperCursor >= activeHopperBlockKeys.size()) hopperCursor = 0;
+        }
+    }
+
+    private boolean isInputHopper(Block hopperBlock, Block storageBlock) {
+        if (hopperBlock.getType() != Material.HOPPER || !(hopperBlock.getBlockData() instanceof Directional directional)) return false;
+        return hopperBlock.getRelative(directional.getFacing()).equals(storageBlock);
+    }
+
+    private String chunkKey(String storageKey) {
+        String[] parts = storageKey.split(",");
+        if (parts.length != 4) return null;
+        try {
+            return chunkKey(parts[0], Integer.parseInt(parts[1]) >> 4, Integer.parseInt(parts[3]) >> 4);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String chunkKey(String worldName, int chunkX, int chunkZ) {
+        return worldName + "," + chunkX + "," + chunkZ;
     }
 
     public void reloadHolograms() {
@@ -247,6 +378,13 @@ public class StorageBlockManager {
 
     public void reload() {
         if (hopperTask != null) hopperTask.cancel();
+        hopperLinks.clear();
+        activeHopperBlocks.clear();
+        activeHopperBlockKeys.clear();
+        hopperCursor = 0;
+        for (StorageBlock storageBlock : personalBlocks.values()) {
+            refreshHopperLinks(storageBlock);
+        }
         startHopperTask();
         reloadHolograms();
     }
@@ -265,8 +403,35 @@ public class StorageBlockManager {
 
     public void shutdown() {
         if (hopperTask != null) hopperTask.cancel();
+        if (autoSaveTask != null) autoSaveTask.cancel();
+        if (!persistenceSuspended) flushDirtyBlocksSync();
         removeAllHolograms();
         if (sqlDataSource != null) sqlDataSource.close();
+    }
+
+    public void flushSync() {
+        if (persistenceSuspended) return;
+        flushDirtyBlocksSync();
+    }
+
+    public void setPersistenceSuspended(boolean suspended) {
+        persistenceSuspended = suspended;
+    }
+
+    public boolean isPersistenceSuspended() {
+        return persistenceSuspended;
+    }
+
+    public int dirtySaveCount() {
+        synchronized (blockSaveLock) {
+            return dirtyBlockSaves.size();
+        }
+    }
+
+    public int dirtyDeleteCount() {
+        synchronized (blockSaveLock) {
+            return dirtyBlockDeletes.size();
+        }
     }
 
     private void load() {
@@ -280,6 +445,9 @@ public class StorageBlockManager {
         loadLegacyIfPresent();
         loadGlobal();
         loadPersonal();
+        for (StorageBlock storageBlock : personalBlocks.values()) {
+            refreshHopperLinks(storageBlock);
+        }
         reloadHolograms();
     }
 
@@ -309,7 +477,9 @@ public class StorageBlockManager {
                 String ownerName = config.getString(path + "owner-name", "Unknown");
                 Set<UUID> members = new HashSet<>();
                 for (String member : config.getStringList(path + "members")) members.add(UUID.fromString(member));
-                personalBlocks.put(key, new StorageBlock(UUID.randomUUID(), key, type, ownerId, ownerName, members));
+                StorageBlock storageBlock = new StorageBlock(UUID.randomUUID(), key, type, ownerId, ownerName, members);
+                personalBlocks.put(key, storageBlock);
+                registerPersonalBlock(storageBlock);
             } else {
                 globalBlocks.put(key, StorageBlock.global(UUID.randomUUID(), key));
             }
@@ -341,7 +511,9 @@ public class StorageBlockManager {
             String ownerName = config.getString(path + "owner-name", "Unknown");
             Set<UUID> members = new HashSet<>();
             for (String member : config.getStringList(path + "members")) members.add(UUID.fromString(member));
-            personalBlocks.put(key, new StorageBlock(UUID.randomUUID(), key, StorageType.PERSONAL, ownerId, ownerName, members));
+            StorageBlock storageBlock = new StorageBlock(UUID.randomUUID(), key, StorageType.PERSONAL, ownerId, ownerName, members);
+            personalBlocks.put(key, storageBlock);
+            registerPersonalBlock(storageBlock);
         }
         saveAllBlocks();
     }
@@ -429,7 +601,9 @@ public class StorageBlockManager {
                 UUID ownerId = UUID.fromString(result.getString("owner_uuid"));
                 String ownerName = result.getString("owner_name");
                 Set<UUID> members = parseMembers(result.getString("members"));
-                personalBlocks.put(key, new StorageBlock(id, key, StorageType.PERSONAL, ownerId, ownerName, members));
+                StorageBlock storageBlock = new StorageBlock(id, key, StorageType.PERSONAL, ownerId, ownerName, members);
+                personalBlocks.put(key, storageBlock);
+                registerPersonalBlock(storageBlock);
             }
         } catch (Exception e) {
             plugin.getLogger().severe("Failed to load SQL personal storage blocks: " + e.getMessage());
@@ -448,6 +622,8 @@ public class StorageBlockManager {
 
                 if (storageBlock.type() == StorageType.PERSONAL) {
                     personalBlocks.put(storageBlock.key(), storageBlock);
+                    registerPersonalBlock(storageBlock);
+                    refreshHopperLinks(storageBlock);
                 } else {
                     globalBlocks.put(storageBlock.key(), storageBlock);
                 }
@@ -473,80 +649,191 @@ public class StorageBlockManager {
     }
 
     private void saveAllBlocks() {
-        for (StorageBlock storageBlock : globalBlocks.values()) saveBlock(storageBlock);
-        for (StorageBlock storageBlock : personalBlocks.values()) saveBlock(storageBlock);
+        for (StorageBlock storageBlock : globalBlocks.values()) markBlockDirty(storageBlock);
+        for (StorageBlock storageBlock : personalBlocks.values()) markBlockDirty(storageBlock);
     }
 
-    private void saveBlock(StorageBlock storageBlock) {
+    private void markBlockDirty(StorageBlock storageBlock) {
+        synchronized (blockSaveLock) {
+            dirtyBlockSaves.put(storageBlock.id(), new DirtyBlockSave(toData(storageBlock), ++blockMutationVersion));
+            dirtyBlockDeletes.remove(storageBlock.id());
+        }
+    }
+
+    private void markBlockDeleted(StorageBlock storageBlock) {
+        synchronized (blockSaveLock) {
+            dirtyBlockSaves.remove(storageBlock.id());
+            dirtyBlockDeletes.put(storageBlock.id(), new DirtyBlockDelete(storageBlock.type(), ++blockMutationVersion));
+        }
+    }
+
+    private void flushDirtyBlocksSync() {
+        if (persistenceSuspended) return;
+        Map<UUID, DirtyBlockSave> saves;
+        Map<UUID, DirtyBlockDelete> deletes;
+        synchronized (blockSaveLock) {
+            saves = new HashMap<>(dirtyBlockSaves);
+            deletes = new HashMap<>(dirtyBlockDeletes);
+        }
+
+        for (Map.Entry<UUID, DirtyBlockDelete> entry : deletes.entrySet()) {
+            if (deleteBlockData(entry.getKey(), entry.getValue().type())) {
+                markBlockDeleteSaved(entry.getKey(), entry.getValue().version());
+            }
+        }
+
+        for (Map.Entry<UUID, DirtyBlockSave> entry : saves.entrySet()) {
+            if (saveBlockData(entry.getValue().data())) {
+                markBlockSaveSaved(entry.getKey(), entry.getValue().version());
+            }
+        }
+    }
+
+    private void markBlockSaveSaved(UUID id, long savedVersion) {
+        synchronized (blockSaveLock) {
+            DirtyBlockSave current = dirtyBlockSaves.get(id);
+            if (current != null && current.version() == savedVersion) {
+                dirtyBlockSaves.remove(id);
+            }
+        }
+    }
+
+    private void markBlockDeleteSaved(UUID id, long savedVersion) {
+        synchronized (blockSaveLock) {
+            DirtyBlockDelete current = dirtyBlockDeletes.get(id);
+            if (current != null && current.version() == savedVersion) {
+                dirtyBlockDeletes.remove(id);
+            }
+        }
+    }
+
+    private boolean saveBlockData(StorageBlockData data) {
         if (!localStorage) {
-            saveSqlBlock(storageBlock);
-            return;
+            return saveSqlBlock(data);
         }
         ensureStorageDirectories();
-        File file = fileFor(storageBlock);
+        File file = fileFor(data);
+        File tempFile = new File(file.getParentFile(), file.getName() + ".tmp");
         try {
-            Files.writeString(file.toPath(), plugin.getGson().toJson(toData(storageBlock)), StandardCharsets.UTF_8);
+            Files.writeString(tempFile.toPath(), plugin.getGson().toJson(data), StandardCharsets.UTF_8);
+            try {
+                Files.move(tempFile.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            } catch (IOException atomicMoveFailure) {
+                Files.move(tempFile.toPath(), file.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            }
+            return true;
         } catch (IOException e) {
-            plugin.getLogger().severe("Failed to save storage block " + storageBlock.id() + ": " + e.getMessage());
+            try {
+                Files.deleteIfExists(tempFile.toPath());
+            } catch (IOException ignored) {
+            }
+            plugin.getLogger().severe("Failed to save storage block " + data.id + ": " + e.getMessage());
+            return false;
         }
     }
 
-    private void deleteBlockFile(StorageBlock storageBlock) {
+    private boolean deleteBlockData(UUID id, StorageType type) {
         if (!localStorage) {
-            deleteSqlBlock(storageBlock);
-            return;
+            return deleteSqlBlock(id, type);
         }
         try {
-            Files.deleteIfExists(fileFor(storageBlock).toPath());
+            Files.deleteIfExists(fileFor(id, type).toPath());
+            return true;
         } catch (IOException e) {
-            plugin.getLogger().warning("Failed to delete storage block file " + storageBlock.id() + ": " + e.getMessage());
+            plugin.getLogger().warning("Failed to delete storage block file " + id + ": " + e.getMessage());
+            return false;
         }
     }
 
-    private void saveSqlBlock(StorageBlock storageBlock) {
-        String table = storageBlock.type() == StorageType.PERSONAL ? personalTable : globalTable;
-        String deleteSql = "DELETE FROM " + table + " WHERE id = ?";
-        String insertSql = storageBlock.type() == StorageType.PERSONAL
+    private boolean saveSqlBlock(StorageBlockData data) {
+        StorageType type = StorageType.valueOf(data.type);
+        String table = type == StorageType.PERSONAL ? personalTable : globalTable;
+        String updateSql = type == StorageType.PERSONAL
+                ? "UPDATE " + table + " SET location_key = ?, owner_uuid = ?, owner_name = ?, members = ? WHERE id = ?"
+                : "UPDATE " + table + " SET location_key = ? WHERE id = ?";
+        String insertSql = type == StorageType.PERSONAL
                 ? "INSERT INTO " + table + " (id, location_key, owner_uuid, owner_name, members) VALUES (?, ?, ?, ?, ?)"
                 : "INSERT INTO " + table + " (id, location_key) VALUES (?, ?)";
 
         try (Connection connection = sqlDataSource.getConnection()) {
             connection.setAutoCommit(false);
-            try (PreparedStatement delete = connection.prepareStatement(deleteSql)) {
-                delete.setString(1, storageBlock.id().toString());
-                delete.executeUpdate();
-            }
-            try (PreparedStatement insert = connection.prepareStatement(insertSql)) {
-                insert.setString(1, storageBlock.id().toString());
-                insert.setString(2, storageBlock.key());
-                if (storageBlock.type() == StorageType.PERSONAL) {
-                    insert.setString(3, storageBlock.ownerId().toString());
-                    insert.setString(4, storageBlock.ownerName());
-                    insert.setString(5, plugin.getGson().toJson(storageBlock.members().stream().map(UUID::toString).sorted().toList()));
+
+            try {
+                int updated;
+                try (PreparedStatement update = connection.prepareStatement(updateSql)) {
+                    if (type == StorageType.PERSONAL) {
+                        update.setString(1, data.key);
+                        update.setString(2, data.ownerId);
+                        update.setString(3, data.ownerName);
+                        update.setString(4, plugin.getGson().toJson(data.members));
+                        update.setString(5, data.id);
+                    } else {
+                        update.setString(1, data.key);
+                        update.setString(2, data.id);
+                    }
+                    updated = update.executeUpdate();
                 }
-                insert.executeUpdate();
+
+                if (updated == 0) {
+                    try (PreparedStatement insert = connection.prepareStatement(insertSql)) {
+                        insert.setString(1, data.id);
+                        insert.setString(2, data.key);
+                        if (type == StorageType.PERSONAL) {
+                            insert.setString(3, data.ownerId);
+                            insert.setString(4, data.ownerName);
+                            insert.setString(5, plugin.getGson().toJson(data.members));
+                        }
+                        insert.executeUpdate();
+                    }
+                }
+
+                connection.commit();
+                return true;
+            } catch (Exception e) {
+                rollback(connection, "storage block save " + data.id);
+                plugin.getLogger().severe("Failed to save SQL storage block " + data.id + ": " + e.getMessage());
+                return false;
+            } finally {
+                try {
+                    connection.setAutoCommit(true);
+                } catch (SQLException ignored) {
+                }
             }
-            connection.commit();
         } catch (Exception e) {
-            plugin.getLogger().severe("Failed to save SQL storage block " + storageBlock.id() + ": " + e.getMessage());
+            plugin.getLogger().severe("Failed to open SQL connection for storage block save " + data.id + ": " + e.getMessage());
+            return false;
         }
     }
 
-    private void deleteSqlBlock(StorageBlock storageBlock) {
-        String table = storageBlock.type() == StorageType.PERSONAL ? personalTable : globalTable;
+    private boolean deleteSqlBlock(UUID id, StorageType type) {
+        String table = type == StorageType.PERSONAL ? personalTable : globalTable;
         String sql = "DELETE FROM " + table + " WHERE id = ?";
         try (Connection connection = sqlDataSource.getConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
-            statement.setString(1, storageBlock.id().toString());
+            statement.setString(1, id.toString());
             statement.executeUpdate();
+            return true;
         } catch (Exception e) {
-            plugin.getLogger().warning("Failed to delete SQL storage block " + storageBlock.id() + ": " + e.getMessage());
+            plugin.getLogger().warning("Failed to delete SQL storage block " + id + ": " + e.getMessage());
+            return false;
         }
     }
 
-    private File fileFor(StorageBlock storageBlock) {
-        File directory = storageBlock.type() == StorageType.PERSONAL ? personalDirectory : globalDirectory;
-        return new File(directory, storageBlock.id() + ".json");
+    private void rollback(Connection connection, String action) {
+        try {
+            connection.rollback();
+        } catch (SQLException e) {
+            plugin.getLogger().severe("Failed to rollback SQL " + action + ": " + e.getMessage());
+        }
+    }
+
+    private File fileFor(StorageBlockData data) {
+        return fileFor(UUID.fromString(data.id), StorageType.valueOf(data.type));
+    }
+
+    private File fileFor(UUID id, StorageType type) {
+        File directory = type == StorageType.PERSONAL ? personalDirectory : globalDirectory;
+        return new File(directory, id + ".json");
     }
 
     private StorageBlockData toData(StorageBlock storageBlock) {
@@ -590,35 +877,54 @@ public class StorageBlockManager {
         hopperTask = Bukkit.getScheduler().runTaskTimer(plugin, this::tickHoppers, interval, interval);
     }
 
+    private void startAutoSaveTask() {
+        autoSaveTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
+                plugin,
+                this::flushDirtyBlocksSync,
+                AUTO_SAVE_TICKS,
+                AUTO_SAVE_TICKS
+        );
+    }
+
     private void tickHoppers() {
         if (!plugin.getConfig().getBoolean("storage-block.hoppers.enabled", true)) return;
-        for (StorageBlock storageBlock : personalBlocks.values()) {
+        if (activeHopperBlockKeys.isEmpty()) return;
+
+        int maxPerTick = Math.max(1, plugin.getConfig().getInt("storage-block.hoppers.blocks-per-tick", 64));
+        int processed = Math.min(maxPerTick, activeHopperBlockKeys.size());
+
+        for (int i = 0; i < processed; i++) {
+            if (hopperCursor >= activeHopperBlockKeys.size()) hopperCursor = 0;
+            String key = activeHopperBlockKeys.get(hopperCursor++);
+            StorageBlock storageBlock = personalBlocks.get(key);
+            if (storageBlock == null) {
+                setHopperActive(key, false);
+                continue;
+            }
             Location location = locationFromKey(storageBlock.key());
             if (location == null || location.getWorld() == null || !location.isChunkLoaded()) continue;
 
-            if (plugin.getConfig().getBoolean("storage-block.hoppers.input", true)) {
-                tickInputHoppers(location, storageBlock);
-            }
-            if (plugin.getConfig().getBoolean("storage-block.hoppers.output", true)) {
-                tickOutputHopper(location, storageBlock);
-            }
+            HopperLinks links = hopperLinks.get(storageBlock.key());
+            if (links == null || !links.isStillValid(location)) links = refreshHopperLinks(storageBlock);
+
+            if (plugin.getConfig().getBoolean("storage-block.hoppers.input", true)) tickInputHoppers(links, storageBlock);
+            if (plugin.getConfig().getBoolean("storage-block.hoppers.output", true)) tickOutputHopper(links, storageBlock);
         }
     }
 
-    private void tickInputHoppers(Location location, StorageBlock storageBlock) {
-        for (BlockFace face : HOPPER_INPUT_FACES) {
-            Block hopperBlock = location.getBlock().getRelative(face);
-            if (hopperBlock.getType() != Material.HOPPER || !(hopperBlock.getBlockData() instanceof Directional directional)) continue;
-            if (hopperBlock.getRelative(directional.getFacing()).equals(location.getBlock())) {
-                moveOneFromHopperToContainer(hopperBlock, storageBlock.ownerId());
-            }
+    private void tickInputHoppers(HopperLinks links, StorageBlock storageBlock) {
+        for (String hopperKey : links.inputHopperKeys()) {
+            Location hopperLocation = locationFromKey(hopperKey);
+            if (hopperLocation == null || hopperLocation.getWorld() == null || !hopperLocation.isChunkLoaded()) continue;
+            moveOneFromHopperToContainer(hopperLocation.getBlock(), storageBlock.ownerId());
         }
     }
 
-    private void tickOutputHopper(Location location, StorageBlock storageBlock) {
-        Block hopperBlock = location.getBlock().getRelative(BlockFace.DOWN);
-        if (hopperBlock.getType() != Material.HOPPER) return;
-        moveOneFromContainerToHopper(hopperBlock, storageBlock.ownerId());
+    private void tickOutputHopper(HopperLinks links, StorageBlock storageBlock) {
+        if (links.outputHopperKey() == null) return;
+        Location hopperLocation = locationFromKey(links.outputHopperKey());
+        if (hopperLocation == null || hopperLocation.getWorld() == null || !hopperLocation.isChunkLoaded()) return;
+        moveOneFromContainerToHopper(hopperLocation.getBlock(), storageBlock.ownerId());
     }
 
     private void moveOneFromHopperToContainer(Block hopperBlock, UUID ownerId) {
@@ -630,9 +936,14 @@ public class StorageBlockManager {
 
             ItemStack moving = item.clone();
             moving.setAmount(1);
-            containerManager.addItemToContainer(ownerId, moving);
+            StorageBlockHopperTransferEvent event = new StorageBlockHopperTransferEvent(ownerId, hopperBlock, moving, StorageBlockHopperTransferEvent.Direction.INTO_CONTAINER);
+            Bukkit.getPluginManager().callEvent(event);
+            if (event.isCancelled()) return;
+            int added = containerManager.addItemToContainer(ownerId, moving);
+            if (added <= 0) return;
+            AuditLogger.logSystem("hopper-input", ownerId.toString(), "amount=" + added + " item=" + item.getType() + " hopper=" + key(hopperBlock.getLocation()));
             ContainerGUI.queueRefresh(ownerId);
-            item.setAmount(item.getAmount() - 1);
+            item.setAmount(item.getAmount() - added);
             inventory.setItem(slot, item.getAmount() > 0 ? item : null);
             return;
         }
@@ -644,11 +955,15 @@ public class StorageBlockManager {
         for (ItemStack stored : containerManager.getAllItemFromContainer(ownerId)) {
             ItemStack moving = stored.clone();
             moving.setAmount(1);
+            StorageBlockHopperTransferEvent event = new StorageBlockHopperTransferEvent(ownerId, hopperBlock, moving, StorageBlockHopperTransferEvent.Direction.OUT_OF_CONTAINER);
+            Bukkit.getPluginManager().callEvent(event);
+            if (event.isCancelled()) return;
             if (!inventory.addItem(moving).isEmpty()) return;
 
             ItemStack target = moving.clone();
             target.setAmount(1);
             containerManager.takeItemFromContainer(ownerId, target, 1);
+            AuditLogger.logSystem("hopper-output", ownerId.toString(), "amount=1 item=" + moving.getType() + " hopper=" + key(hopperBlock.getLocation()));
             ContainerGUI.queueRefresh(ownerId);
             return;
         }
@@ -699,6 +1014,8 @@ public class StorageBlockManager {
 
         String owner = storageBlock != null && storageBlock.ownerName() != null ? storageBlock.ownerName() : "";
         String text = String.join("\n", lines).replace("{owner}", owner);
+        Player ownerPlayer = storageBlock != null && storageBlock.ownerId() != null ? Bukkit.getPlayer(storageBlock.ownerId()) : null;
+        text = PlaceholderHook.apply(ownerPlayer, text);
         return LEGACY.deserialize(VContainer.formatMessage(text));
     }
 
@@ -761,5 +1078,33 @@ public class StorageBlockManager {
         private String ownerId;
         private String ownerName;
         private List<String> members = new ArrayList<>();
+    }
+
+    private record DirtyBlockSave(StorageBlockData data, long version) {
+    }
+
+    private record DirtyBlockDelete(StorageType type, long version) {
+    }
+
+    private record HopperLinks(List<String> inputHopperKeys, String outputHopperKey) {
+        private boolean hasAny() {
+            return !inputHopperKeys.isEmpty() || outputHopperKey != null;
+        }
+
+        private boolean isStillValid(Location storageLocation) {
+            if (storageLocation == null || storageLocation.getWorld() == null || !storageLocation.isChunkLoaded()) return false;
+            Block storageBlock = storageLocation.getBlock();
+            for (String inputKey : inputHopperKeys) {
+                Location location = VContainer.getInstance().getStorageBlockManager().locationFromKey(inputKey);
+                if (location == null || location.getWorld() == null || location.getBlock().getType() != Material.HOPPER) return false;
+                if (!(location.getBlock().getBlockData() instanceof Directional directional)) return false;
+                if (!location.getBlock().getRelative(directional.getFacing()).equals(storageBlock)) return false;
+            }
+            if (outputHopperKey != null) {
+                Location output = VContainer.getInstance().getStorageBlockManager().locationFromKey(outputHopperKey);
+                return output != null && output.getWorld() != null && output.getBlock().getType() == Material.HOPPER;
+            }
+            return true;
+        }
     }
 }

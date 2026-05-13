@@ -7,6 +7,7 @@ import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageBlock;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageType;
 import hu.vzone.vcontainer.utils.PermissionUtils;
+import hu.vzone.vcontainer.utils.SkinProvider;
 import hu.vzone.vcontainer.utils.StorageBlockItem;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -25,9 +26,12 @@ import org.bukkit.event.block.BlockExplodeEvent;
 import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
+
+import java.util.List;
 
 public class ContainerListener implements Listener {
 
@@ -49,6 +53,11 @@ public class ContainerListener implements Listener {
         if (storageBlock == null) return;
 
         Player player = event.getPlayer();
+        if (VContainer.getInstance().isRestartRequired()) {
+            event.setCancelled(true);
+            send(player, "command.restart-required", "{prefix} VContainer is waiting for a server restart.");
+            return;
+        }
         if (storageBlock.type() == StorageType.PERSONAL && player.isSneaking()) {
             if (tryAttachHopper(event, block, player)) {
                 event.setCancelled(true);
@@ -77,6 +86,17 @@ public class ContainerListener implements Listener {
 
     @EventHandler(ignoreCancelled = true)
     public void onStorageBlockPlace(BlockPlaceEvent event) {
+        if (VContainer.getInstance().isRestartRequired()) {
+            if (StorageBlockItem.isStorageBlockItem(VContainer.getInstance(), event.getItemInHand())) {
+                event.setCancelled(true);
+                send(event.getPlayer(), "command.restart-required", "{prefix} VContainer is waiting for a server restart.");
+            }
+            return;
+        }
+        if (event.getBlockPlaced().getType() == Material.HOPPER) {
+            refreshNearbyHopperLinks(event.getBlockPlaced());
+        }
+
         if (!StorageBlockItem.isStorageBlockItem(VContainer.getInstance(), event.getItemInHand())) return;
 
         if (!storageBlockManager.canPlacePersonal(event.getBlockPlaced(), event.getPlayer())) {
@@ -139,9 +159,14 @@ public class ContainerListener implements Listener {
         ContainerGUI.clearSortPreference(event.getPlayer().getUniqueId());
     }
 
+    @EventHandler
+    public void onJoin(PlayerJoinEvent event) {
+        SkinProvider.cache(event.getPlayer());
+    }
+
     private void send(Player player, String path, String fallback) {
         VContainer plugin = VContainer.getInstance();
-        player.sendMessage(VContainer.formatMessage(plugin.getMessageConfig().getString(path, fallback)));
+        player.sendMessage(VContainer.formatMessage(player, plugin.getMessageConfig().getString(path, fallback)));
     }
 
     private boolean tryAttachHopper(PlayerInteractEvent event, Block storageBlock, Player player) {
@@ -161,6 +186,7 @@ public class ContainerListener implements Listener {
         }
 
         target.setBlockData(data, true);
+        storageBlockManager.refreshHopperLinks(storageBlock);
         if (player.getGameMode() != GameMode.CREATIVE) {
             if (item.getAmount() <= 1) {
                 player.getInventory().setItemInMainHand(null);
@@ -169,5 +195,14 @@ public class ContainerListener implements Listener {
             }
         }
         return true;
+    }
+
+    private void refreshNearbyHopperLinks(Block hopperBlock) {
+        for (BlockFace face : List.of(BlockFace.NORTH, BlockFace.SOUTH, BlockFace.EAST, BlockFace.WEST, BlockFace.UP, BlockFace.DOWN)) {
+            Block relative = hopperBlock.getRelative(face);
+            if (storageBlockManager.get(relative) != null) {
+                storageBlockManager.refreshHopperLinks(relative);
+            }
+        }
     }
 }
