@@ -97,3 +97,11 @@ storage-block:
   # Placeholder: {limit}
   chunk-limit: "{prefix} You can only place {limit} personal storage blocks in this chunk."
   personal-break-protected: "{prefix} Pick up this storage block from its menu."
+
+# Sort mode labels used in the container GUI.
+sort-types:
+  NONE: "None"
+  ABC_ASC: "ABC A-Z"
+  ABC_DESC: "ABC Z-A"
+  AMOUNT_DESC: "Most items"
+  AMOUNT_ASC: "Fewest items"

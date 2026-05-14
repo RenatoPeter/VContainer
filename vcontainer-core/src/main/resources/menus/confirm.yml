@@ -1,0 +1,59 @@
+# ============================================================================
+# VContainer confirm GUI
+# ----------------------------------------------------------------------------
+# Used by block pickup and other confirmation prompts.
+#
+# The title passed by code is available as %title%.
+# Text values support legacy colors, hex colors, and MiniMessage tags.
+# ============================================================================
+gui-version: 2
+title: "%title%"
+rows: 3
+
+titles:
+  block-pickup: "&0Confirm block pickup"
+
+items:
+  filler:
+    Material: GRAY_STAINED_GLASS_PANE
+    Slots:
+      - 0
+      - 1
+      - 2
+      - 3
+      - 4
+      - 5
+      - 6
+      - 7
+      - 8
+      - 9
+      - 10
+      - 12
+      - 13
+      - 14
+      - 16
+      - 17
+      - 18
+      - 19
+      - 20
+      - 21
+      - 22
+      - 23
+      - 24
+      - 25
+      - 26
+    Name: " "
+
+  confirm:
+    Material: LIME_CONCRETE
+    Slot: 11
+    Name: "&aConfirm"
+    Lore:
+      - "&7This action cannot always be undone."
+
+  cancel:
+    Material: RED_CONCRETE
+    Slot: 15
+    Name: "&cCancel"
+    Lore:
+      - "&7Return without changing anything."

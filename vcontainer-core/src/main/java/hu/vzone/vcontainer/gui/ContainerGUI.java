@@ -436,7 +436,7 @@ public class ContainerGUI {
             if (!(event.getWhoClicked() instanceof Player player)) return;
             if (!storageBlockManager.isOwner(player, storageBlockManager.get(storageKey))) return;
 
-            ConfirmGUI.open(player, "&0Confirm block pickup", () -> {
+            ConfirmGUI.open(player, "block-pickup", "&0Confirm block pickup", () -> {
                 storageBlockManager.removePersonal(storageKey, false);
                 AuditLogger.log("personal-block-pickup", player, storageKey, "owner=" + ownerName);
                 for (ItemStack leftover : player.getInventory().addItem(StorageBlockItem.build(plugin, 1)).values()) {
@@ -902,7 +902,9 @@ public class ContainerGUI {
         }
 
         private String displayName() {
-            return displayName;
+            VContainer plugin = VContainer.getInstance();
+            if (plugin == null) return displayName;
+            return plugin.getMessageConfig().getString("sort-types." + name(), displayName);
         }
 
         private SortMode next() {

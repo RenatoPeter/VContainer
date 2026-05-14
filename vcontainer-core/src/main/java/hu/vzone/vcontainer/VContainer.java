@@ -212,6 +212,7 @@ public final class VContainer extends JavaPlugin {
     private void createMenuConfigs() {
         menuConfigs.clear();
         loadMenuConfig("container");
+        loadMenuConfig("confirm");
         loadMenuConfig("members");
     }
 
