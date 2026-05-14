@@ -14,10 +14,12 @@ import org.bukkit.GameMode;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
+import org.bukkit.block.BlockState;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.data.Directional;
 import org.bukkit.block.data.type.SculkShrieker;
 import org.bukkit.entity.Player;
+import org.bukkit.event.Event;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
@@ -28,6 +30,8 @@ import org.bukkit.event.entity.EntityExplodeEvent;
 import org.bukkit.event.player.PlayerInteractEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
+import org.bukkit.event.world.ChunkLoadEvent;
+import org.bukkit.event.world.ChunkUnloadEvent;
 import org.bukkit.inventory.EquipmentSlot;
 import org.bukkit.inventory.ItemStack;
 
@@ -59,6 +63,16 @@ public class ContainerListener implements Listener {
             return;
         }
         if (storageBlock.type() == StorageType.PERSONAL && player.isSneaking()) {
+            if (!PermissionUtils.has(player, "vcontainer.block.use")) {
+                event.setCancelled(true);
+                send(player, "storage-block.no-use-permission", "{prefix} You don't have permission to use this storage block.");
+                return;
+            }
+            if (!storageBlockManager.canAccess(player, storageBlock)) {
+                event.setCancelled(true);
+                send(player, "storage-block.no-access", "{prefix} You are not added to this storage block.");
+                return;
+            }
             if (tryAttachHopper(event, block, player)) {
                 event.setCancelled(true);
             }
@@ -164,6 +178,16 @@ public class ContainerListener implements Listener {
         SkinProvider.cache(event.getPlayer());
     }
 
+    @EventHandler
+    public void onChunkLoad(ChunkLoadEvent event) {
+        storageBlockManager.handleChunkLoad(event.getWorld(), event.getChunk().getX(), event.getChunk().getZ());
+    }
+
+    @EventHandler
+    public void onChunkUnload(ChunkUnloadEvent event) {
+        storageBlockManager.handleChunkUnload(event.getWorld(), event.getChunk().getX(), event.getChunk().getZ());
+    }
+
     private void send(Player player, String path, String fallback) {
         VContainer plugin = VContainer.getInstance();
         player.sendMessage(VContainer.formatMessage(player, plugin.getMessageConfig().getString(path, fallback)));
@@ -185,7 +209,21 @@ public class ContainerListener implements Listener {
             data = directional;
         }
 
-        target.setBlockData(data, true);
+        BlockState replacedState = target.getState();
+        target.setType(Material.HOPPER, false);
+        target.setBlockData(data, false);
+
+        BlockPlaceEvent placeEvent = new BlockPlaceEvent(target, replacedState, storageBlock, item.clone(), player, true, EquipmentSlot.HAND);
+        Bukkit.getPluginManager().callEvent(placeEvent);
+        if (placeEvent.isCancelled() || !placeEvent.canBuild()) {
+            replacedState.update(true, false);
+            if (placeEvent.isCancelled()) {
+                event.setUseInteractedBlock(Event.Result.DENY);
+                event.setUseItemInHand(Event.Result.DENY);
+            }
+            return true;
+        }
+
         storageBlockManager.refreshHopperLinks(storageBlock);
         if (player.getGameMode() != GameMode.CREATIVE) {
             if (item.getAmount() <= 1) {

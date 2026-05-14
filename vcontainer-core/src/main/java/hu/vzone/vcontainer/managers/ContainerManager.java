@@ -155,6 +155,14 @@ public class ContainerManager {
         return Collections.unmodifiableList(cloneItems(getOrCreate(ownerId)));
     }
 
+    public synchronized ItemStack peekFirstItem(UUID ownerId) {
+        for (ItemStack item : getOrCreate(ownerId)) {
+            if (item == null || item.getType().isAir() || item.getAmount() <= 0) continue;
+            return item.clone();
+        }
+        return null;
+    }
+
     public synchronized Map<UUID, List<ItemStack>> snapshotContainers() {
         return cloneContainers(cache);
     }

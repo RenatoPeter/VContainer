@@ -368,11 +368,11 @@ public class StorageBlockManager {
         removeAllHolograms();
         for (String key : globalBlocks.keySet()) {
             Location location = locationFromKey(key);
-            if (location != null) spawnHologram(location);
+            if (location != null && location.isChunkLoaded()) spawnHologram(location);
         }
         for (String key : personalBlocks.keySet()) {
             Location location = locationFromKey(key);
-            if (location != null) spawnHologram(location);
+            if (location != null && location.isChunkLoaded()) spawnHologram(location);
         }
     }
 
@@ -390,15 +390,23 @@ public class StorageBlockManager {
     }
 
     public void removeAllHolograms() {
-        for (String key : globalBlocks.keySet()) {
+        for (String key : new ArrayList<>(holograms.keySet())) {
             Location location = locationFromKey(key);
-            if (location != null) removeHologram(location);
-        }
-        for (String key : personalBlocks.keySet()) {
-            Location location = locationFromKey(key);
-            if (location != null) removeHologram(location);
+            if (location != null) {
+                removeHologram(location);
+            } else {
+                holograms.remove(key);
+            }
         }
         holograms.clear();
+    }
+
+    public void handleChunkLoad(World world, int chunkX, int chunkZ) {
+        updateChunkHolograms(world, chunkX, chunkZ, true);
+    }
+
+    public void handleChunkUnload(World world, int chunkX, int chunkZ) {
+        updateChunkHolograms(world, chunkX, chunkZ, false);
     }
 
     public void shutdown() {
@@ -952,26 +960,26 @@ public class StorageBlockManager {
     private void moveOneFromContainerToHopper(Block hopperBlock, UUID ownerId) {
         if (!(hopperBlock.getState() instanceof Hopper hopper)) return;
         Inventory inventory = hopper.getInventory();
-        for (ItemStack stored : containerManager.getAllItemFromContainer(ownerId)) {
-            ItemStack moving = stored.clone();
-            moving.setAmount(1);
-            StorageBlockHopperTransferEvent event = new StorageBlockHopperTransferEvent(ownerId, hopperBlock, moving, StorageBlockHopperTransferEvent.Direction.OUT_OF_CONTAINER);
-            Bukkit.getPluginManager().callEvent(event);
-            if (event.isCancelled()) return;
-            if (!inventory.addItem(moving).isEmpty()) return;
+        ItemStack stored = containerManager.peekFirstItem(ownerId);
+        if (stored == null || stored.getType().isAir()) return;
 
-            ItemStack target = moving.clone();
-            target.setAmount(1);
-            containerManager.takeItemFromContainer(ownerId, target, 1);
-            AuditLogger.logSystem("hopper-output", ownerId.toString(), "amount=1 item=" + moving.getType() + " hopper=" + key(hopperBlock.getLocation()));
-            ContainerGUI.queueRefresh(ownerId);
-            return;
-        }
+        ItemStack moving = stored.clone();
+        moving.setAmount(1);
+        StorageBlockHopperTransferEvent event = new StorageBlockHopperTransferEvent(ownerId, hopperBlock, moving, StorageBlockHopperTransferEvent.Direction.OUT_OF_CONTAINER);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) return;
+        if (!inventory.addItem(moving).isEmpty()) return;
+
+        ItemStack target = moving.clone();
+        target.setAmount(1);
+        containerManager.takeItemFromContainer(ownerId, target, 1);
+        AuditLogger.logSystem("hopper-output", ownerId.toString(), "amount=1 item=" + moving.getType() + " hopper=" + key(hopperBlock.getLocation()));
+        ContainerGUI.queueRefresh(ownerId);
     }
 
     private void spawnHologram(Location blockLocation) {
         if (!plugin.getConfig().getBoolean("storage-block.hologram.enabled", true)) return;
-        if (blockLocation.getWorld() == null) return;
+        if (blockLocation.getWorld() == null || !blockLocation.isChunkLoaded()) return;
 
         removeHologram(blockLocation);
 
@@ -997,14 +1005,6 @@ public class StorageBlockManager {
         if (uuid != null) {
             Entity entity = Bukkit.getEntity(uuid);
             if (entity != null) entity.remove();
-        }
-
-        if (blockLocation.getWorld() == null) return;
-        String tag = tagFor(blockLocation);
-        for (Entity entity : blockLocation.getWorld().getNearbyEntities(blockLocation.clone().add(0.5, 1.0, 0.5), 1.5, 2.5, 1.5)) {
-            if (entity.getScoreboardTags().contains(HOLOGRAM_TAG) && entity.getScoreboardTags().contains(tag)) {
-                entity.remove();
-            }
         }
     }
 
@@ -1053,6 +1053,23 @@ public class StorageBlockManager {
             return new Location(world, Integer.parseInt(parts[1]), Integer.parseInt(parts[2]), Integer.parseInt(parts[3]));
         } catch (NumberFormatException e) {
             return null;
+        }
+    }
+
+    private void updateChunkHolograms(World world, int chunkX, int chunkZ, boolean loaded) {
+        if (world == null) return;
+
+        for (StorageBlock storageBlock : getStorageBlocks()) {
+            Location location = locationFromKey(storageBlock.key());
+            if (location == null || location.getWorld() == null) continue;
+            if (!location.getWorld().getUID().equals(world.getUID())) continue;
+            if ((location.getBlockX() >> 4) != chunkX || (location.getBlockZ() >> 4) != chunkZ) continue;
+
+            if (loaded) {
+                spawnHologram(location);
+            } else {
+                removeHologram(location);
+            }
         }
     }
 

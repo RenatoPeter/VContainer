@@ -535,6 +535,38 @@ player-heads:
 
 The API module is `vcontainer-api`. Other plugins can access it through Bukkit's `ServicesManager`:
 
+### Dependency Setup
+
+Maven:
+
+```xml
+<repositories>
+  <repository>
+    <id>vzone-repo</id>
+    <url>https://repo.vzone.hu/releases</url>
+  </repository>
+</repositories>
+
+<dependency>
+  <groupId>hu.vzone</groupId>
+  <artifactId>VContainer</artifactId>
+  <version>1.0.0</version>
+  <scope>provided</scope>
+</dependency>
+```
+
+Gradle:
+
+```gradle
+repositories {
+  maven("https://repo.vzone.hu/releases")
+}
+
+dependencies {
+  compileOnly("hu.vzone:VContainer:1.0.0")
+}
+```
+
 ```java
 RegisteredServiceProvider<VContainerAPI> provider =
         Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
@@ -593,6 +625,112 @@ String getStorageBackendType();
 boolean isLocalStorageBackend();
 ```
 
+### Usage Examples
+
+Give an item to a player's virtual container:
+
+```java
+RegisteredServiceProvider<VContainerAPI> provider =
+        Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
+
+if (provider == null) return;
+
+VContainerAPI api = provider.getProvider();
+api.addItem(player, new ItemStack(Material.DIAMOND, 16));
+player.sendMessage("16 diamonds were added to your VContainer.");
+```
+
+Withdraw a specific amount by UUID:
+
+```java
+RegisteredServiceProvider<VContainerAPI> provider =
+        Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
+
+if (provider == null) return;
+
+VContainerAPI api = provider.getProvider();
+ItemStack template = new ItemStack(Material.GOLD_INGOT);
+int removed = api.takeItem(targetUuid, template, 32);
+
+Bukkit.getLogger().info("Removed " + removed + " gold ingots from " + targetUuid);
+```
+
+Read container contents and count matching items:
+
+```java
+RegisteredServiceProvider<VContainerAPI> provider =
+        Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
+
+if (provider == null) return;
+
+VContainerAPI api = provider.getProvider();
+int totalDiamonds = api.getItems(player).stream()
+        .filter(item -> item.getType() == Material.DIAMOND)
+        .mapToInt(ItemStack::getAmount)
+        .sum();
+
+player.sendMessage("You currently have " + totalDiamonds + " diamonds stored.");
+```
+
+Create a personal storage block programmatically:
+
+```java
+RegisteredServiceProvider<VContainerAPI> provider =
+        Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
+
+if (provider == null) return;
+
+VContainerAPI api = provider.getProvider();
+Block block = player.getTargetBlockExact(6);
+
+if (block != null && api.canPlacePersonalStorageBlock(block, player)) {
+    boolean created = api.createPersonalStorageBlock(block, player);
+    player.sendMessage(created ? "Personal storage block created." : "That block is already registered.");
+}
+```
+
+Inspect a storage block and work with owner/member data:
+
+```java
+RegisteredServiceProvider<VContainerAPI> provider =
+        Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
+
+if (provider == null) return;
+
+VContainerAPI api = provider.getProvider();
+api.getStorageBlock(block).ifPresent(info -> {
+    Bukkit.getLogger().info("Key: " + info.key());
+    Bukkit.getLogger().info("Type: " + info.type());
+    Bukkit.getLogger().info("Owner: " + info.ownerName());
+    Bukkit.getLogger().info("Members: " + info.members().size());
+});
+```
+
+Open another player's container in a custom command:
+
+```java
+RegisteredServiceProvider<VContainerAPI> provider =
+        Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
+
+if (provider == null) return;
+
+VContainerAPI api = provider.getProvider();
+api.openContainer(staffPlayer, targetPlayer.getUniqueId(), targetPlayer.getName());
+```
+
+Create and give the placeable personal storage block item:
+
+```java
+RegisteredServiceProvider<VContainerAPI> provider =
+        Bukkit.getServicesManager().getRegistration(VContainerAPI.class);
+
+if (provider == null) return;
+
+VContainerAPI api = provider.getProvider();
+ItemStack storageBlockItem = api.createPersonalStorageBlockItem(1);
+player.getInventory().addItem(storageBlockItem);
+```
+
 Storage block API responses use:
 
 ```java
@@ -613,7 +751,43 @@ GLOBAL
 PERSONAL
 ```
 
-The API also includes `ContainerAddItemEvent`, fired before an item is added through the player-aware add path. Cancelling the event prevents the add.
+### API Events
+
+Block certain items from being inserted through the player-aware add path:
+
+```java
+@EventHandler
+public void onContainerAdd(ContainerAddItemEvent event) {
+    if (event.getItem().getType() == Material.BEDROCK) {
+        event.setCancelled(true);
+    }
+}
+```
+
+React when items are withdrawn:
+
+```java
+@EventHandler
+public void onContainerWithdraw(ContainerWithdrawItemEvent event) {
+    Bukkit.getLogger().info("Player container " + event.getOwnerId()
+            + " requested " + event.getRequestedAmount()
+            + " of " + event.getItem().getType());
+}
+```
+
+Control hopper automation into or out of personal storage blocks:
+
+```java
+@EventHandler
+public void onHopperTransfer(StorageBlockHopperTransferEvent event) {
+    if (event.getDirection() == StorageBlockHopperTransferEvent.Direction.OUT_OF_CONTAINER
+            && event.getItem().getType() == Material.NETHER_STAR) {
+        event.setCancelled(true);
+    }
+}
+```
+
+The API includes `ContainerAddItemEvent`, `ContainerWithdrawItemEvent`, and `StorageBlockHopperTransferEvent`.
 
 ## Developer Notes
 
