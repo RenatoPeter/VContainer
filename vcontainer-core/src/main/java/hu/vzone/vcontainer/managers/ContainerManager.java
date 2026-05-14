@@ -3,6 +3,7 @@ package hu.vzone.vcontainer.managers;
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.api.events.ContainerAddItemEvent;
 import hu.vzone.vcontainer.api.events.ContainerWithdrawItemEvent;
+import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.storage.ContainerStorage;
 import hu.vzone.vcontainer.storage.LocalContainerStorage;
 import hu.vzone.vcontainer.storage.SqlContainerStorage;
@@ -216,6 +217,7 @@ public class ContainerManager {
 
     private synchronized void markDirty(UUID id) {
         dirtyVersions.put(id, ++mutationVersion);
+        ContainerGUI.queueRefresh(id);
     }
 
     private void flushDirtySync() {
