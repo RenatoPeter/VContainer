@@ -45,6 +45,6 @@ items:
     Material: ARROW
     Action: back
     Slot: 49
-    Name: "&aBack"
+    Name: "&c← ʙᴀᴄᴋ"
     Lore:
       - "&7Return to storage"
