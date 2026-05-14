@@ -212,6 +212,12 @@ public class StorageBlockManager {
         return storageBlock != null && storageBlock.type() == StorageType.PERSONAL && storageBlock.ownerId().equals(player.getUniqueId());
     }
 
+    public boolean canManage(Player player, StorageBlock storageBlock) {
+        if (player == null || storageBlock == null) return false;
+        if (storageBlock.type() != StorageType.PERSONAL) return false;
+        return player.isOp() || storageBlock.ownerId().equals(player.getUniqueId());
+    }
+
     public boolean canPlacePersonal(Block block, Player owner) {
         if (PermissionUtils.has(owner, "vcontainer.block.limit.bypass")) return true;
 

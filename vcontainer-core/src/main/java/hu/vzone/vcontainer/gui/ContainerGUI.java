@@ -429,12 +429,12 @@ public class ContainerGUI {
         if (storageBlockManager == null || storageKey == null) return;
 
         StorageBlock storageBlock = storageBlockManager.get(storageKey);
-        if (!storageBlockManager.isOwner(viewer, storageBlock)) return;
+        if (!storageBlockManager.canManage(viewer, storageBlock)) return;
 
         gui.setItem(itemSlot(plugin, "container", "storage-pickup", PICKUP_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "storage-pickup", viewer)).asGuiItem(event -> {
             event.setCancelled(true);
             if (!(event.getWhoClicked() instanceof Player player)) return;
-            if (!storageBlockManager.isOwner(player, storageBlockManager.get(storageKey))) return;
+            if (!storageBlockManager.canManage(player, storageBlockManager.get(storageKey))) return;
 
             ConfirmGUI.open(player, "block-pickup", "&0Confirm block pickup", () -> {
                 storageBlockManager.removePersonal(storageKey, false);
@@ -458,7 +458,7 @@ public class ContainerGUI {
     private static void openMembersMenu(Player owner, UUID ownerId, String ownerName, ContainerManager manager, StorageBlockManager storageBlockManager, String storageKey) {
         VContainer plugin = VContainer.getInstance();
         StorageBlock storageBlock = storageBlockManager.get(storageKey);
-        if (!storageBlockManager.isOwner(owner, storageBlock)) return;
+        if (!storageBlockManager.canManage(owner, storageBlock)) return;
 
         PaginatedGui gui = Gui.paginated()
                 .title(LEGACY.deserialize(VContainer.formatMessage(menu(plugin, "members").getString("title", "&0Storage Members"))))
