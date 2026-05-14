@@ -96,3 +96,4 @@ storage-block:
   # Sent when the per-player chunk limit prevents placing another personal block.
   # Placeholder: {limit}
   chunk-limit: "{prefix} You can only place {limit} personal storage blocks in this chunk."
+  personal-break-protected: "{prefix} Pick up this storage block from its menu."
