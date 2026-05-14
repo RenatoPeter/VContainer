@@ -47,13 +47,13 @@ items:
   confirm:
     Material: LIME_CONCRETE
     Slot: 11
-    Name: "&aConfirm"
+    Name: "&aᴄᴏɴꜰɪʀᴍ"
     Lore:
       - "&7This action cannot always be undone."
 
   cancel:
     Material: RED_CONCRETE
     Slot: 15
-    Name: "&cCancel"
+    Name: "&cᴄᴀɴᴄᴇʟ"
     Lore:
       - "&7Return without changing anything."

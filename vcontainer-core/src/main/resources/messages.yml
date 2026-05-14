@@ -100,8 +100,8 @@ storage-block:
 
 # Sort mode labels used in the container GUI.
 sort-types:
-  NONE: "None"
-  ABC_ASC: "ABC A-Z"
-  ABC_DESC: "ABC Z-A"
-  AMOUNT_DESC: "Most items"
-  AMOUNT_ASC: "Fewest items"
+  NONE: "ɴᴏɴᴇ"
+  ABC_ASC: "ᴀʙᴄ ᴀ-ᴢ"
+  ABC_DESC: "ᴀʙᴄ ᴢ-ᴀ"
+  AMOUNT_DESC: "ᴍᴏꜱᴛ ɪᴛᴇᴍꜱ"
+  AMOUNT_ASC: "ꜰᴇᴡᴇꜱᴛ ɪᴛᴇᴍꜱ"
