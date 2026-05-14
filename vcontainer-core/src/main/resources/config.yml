@@ -11,14 +11,6 @@
 # next to the setting.
 # ============================================================================
 
-# Main container menu title.
-# Placeholders: %current-page%, %max-page%
-title: "&0Container %current-page%/%max-page%"
-
-# Slots where stored items are displayed in the menu.
-# Leave empty to use the default item area: slots 0-44.
-content-slots: []
-
 # Player interaction rules inside containers.
 container-options:
   # If true, players can put items from their own inventory into the container.

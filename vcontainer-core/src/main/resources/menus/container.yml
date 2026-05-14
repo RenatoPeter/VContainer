@@ -42,7 +42,7 @@ items:
     Material: BARRIER
     Action: storage-pickup
     Slot: 45
-    Name: "&cPick up storage block"
+    Name: "&cᴘɪᴄᴋ ᴜᴘ ꜱᴛᴏʀᴀɢᴇ ʙʟᴏᴄᴋ"
     Lore:
       - "&7Returns this storage block item."
 
@@ -51,9 +51,7 @@ items:
     Material: ARROW
     Action: page-prev
     Slot: 48
-    Name: "&a<< Prev"
-    Lore:
-      - "&7Previous Page"
+    Name: "&c← ᴘʀᴇᴠɪᴏᴜꜱ ᴘᴀɢᴇ"
 
   sorting:
     # Cycles the viewer's personal sorting mode.
@@ -61,7 +59,7 @@ items:
     Material: HOPPER
     Action: sort
     Slot: 49
-    Name: "&bSorting: &f{mode}"
+    Name: "&7ꜱᴏʀᴛɪɴɢ: &a{mode}"
     Lore:
       - "&7Click to switch sorting mode"
       - "&7Next: &f{next-mode}"
@@ -71,7 +69,7 @@ items:
     Material: ARROW
     Action: page-next
     Slot: 50
-    Name: "&aNext >>"
+    Name: "&aɴᴇxᴛ ᴘᴀɢᴇ →"
     Lore:
       - "&7Next Page"
 
@@ -82,6 +80,6 @@ items:
     Action: storage-members
     HeadOwner: "{player}"
     Slot: 53
-    Name: "&aStorage members"
+    Name: "&aꜱᴛᴏʀᴀɢᴇ ᴍᴇᴍʙᴇʀꜱ"
     Lore:
       - "&7Manage who can open this block."
