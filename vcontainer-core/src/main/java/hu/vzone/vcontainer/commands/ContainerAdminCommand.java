@@ -75,8 +75,11 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
         switch (action) {
             case "reload":
                 if (!require(sender, "vcontainer.admin.reload")) return true;
-                plugin.reloadConfig();
+                plugin.reloadMainConfig();
                 plugin.reloadMessageConfig();
+                plugin.reloadDatabaseConfig();
+                plugin.reloadMigrationConfig();
+                plugin.reloadPricesConfig();
                 plugin.reloadMenuConfigs();
                 storageBlockManager.reload();
                 sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.reload", "{prefix} Plugin successfully reloaded!")));

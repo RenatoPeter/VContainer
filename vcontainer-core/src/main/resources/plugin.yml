@@ -4,6 +4,10 @@ main: hu.vzone.vcontainer.VContainer
 api-version: '1.21'
 author: MrVIRO
 softdepend:
+  - Vault
+  - EconomyShopGUI
+  - EconomyShopGUI-Premium
+  - ShopGUIPlus
   - Oraxen
   - MythicMobs
   - ItemsAdder

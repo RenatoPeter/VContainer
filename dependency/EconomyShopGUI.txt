@@ -1,0 +1,378 @@
+EconomyShopGUI-API
+The API of EconomyShopGUI can be used by developers to integrate with your plugin.
+
+Note that this is only a mock version of the actual API within EconomyShopGUI and acts only as a library for your IDE to use. This means you can safely ignore all warnings from your IDE of methods always returning null, simply because the actual API within EconomyShopGUI does not.
+
+Introduction:
+Latest version: 
+
+If any issues are found, you may submit a issue on the issue tracker.
+
+The API has been added since version 3.9/1.12 of EconomyShopGUI/EconomyShopGUI-Premium, this means the server where the API is used needs to have the same or later version of EconomyShopGUI installed.
+
+As of now, the API is similar for the free and premium version, meaning that if the server running the API has EconomyShopGUI Premium installed that this will just work fine, the same for the free version. However, if you plan on using the API for servers with the free or premium version, you should add a softdepend to your plugin.yml for both versions.
+
+Integrating with the API:
+Integrating with the API is very simple. Just add the repository and dependancy to the pom.xml when using maven or the build.gradle when using gradle. And don't forget to make EconomyShopGUI load before your plugin inside the plugin.yml just like so softdepend: [EconomyShopGUI, EconomyShopGUI-Premium]!
+
+Using the pom.xml in maven:
+
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+<dependencies>
+    <dependency>
+        <groupId>com.github.Gypopo</groupId>
+        <artifactId>EconomyShopGUI-API</artifactId>
+        <version>VERSION</version>
+        <scope>provided</scope>
+    </dependency>
+</dependencies>
+Using the build.gradle in gradle
+
+allprojects {
+    repositories {
+        ...
+        maven { url 'https://jitpack.io' }
+    }
+}
+dependencies {
+        compileOnly 'com.github.Gypopo:EconomyShopGUI-API:VERSION'
+}
+Example usage:
+When integrated with the API, calling methods is as simple as:
+
+EconomyShopGUIHook.someMethod();
+
+API Usage
+The API of EconomyShopGUI can be used by developers to integrate with your plugin.
+
+Introduction:
+Latest version:
+
+If any issues are found, you may submit a issue on the issue tracker on github.
+
+The API has been added since version 3.9/1.12 of EconomyShopGUI, this means the server where the API is used needs to have the same or later version of EconomyShopGUI installed.
+
+As of now, the API is similar for the free and premium version, meaning that if the server running the API has EconomyShopGUI Premium installed that this will just work fine, the same for the free version.
+However, if you plan on using the API for servers with the free or premium version, you should add a softdepend to your plugin.yml for both versions.
+
+Integrating with the API:
+Integrating with the API is very simple. 
+Just add the repository and dependancy to the pom.xml when using maven or the build.gradle when using gradle. 
+And don't forget to make EconomyShopGUI load before your plugin inside the plugin.yml just like so softdepend: [EconomyShopGUI, EconomyShopGUI-Premium]!
+
+maven
+gradle
+
+Copy
+<repositories>
+    <repository>
+        <id>jitpack.io</id>
+        <url>https://jitpack.io</url>
+    </repository>
+</repositories>
+<dependencies>
+    <dependency>
+        <groupId>com.github.Gypopo</groupId>
+        <artifactId>EconomyShopGUI-API</artifactId>
+        <version>VERSION</version>
+        <scope>provided</scope>
+    </dependency>
+</dependencies>
+Examples:
+When integrated with the API, calling methods is as simple as:
+
+
+Copy
+EconomyShopGUIHook.someMethod();
+To see an official example on how to use the API in a working plugin, you can see our AutoSellChests project at my Github here: https://github.com/Gypopo/AutoSellChests/blob/main/src/main/java/me/gypopo/autosellchests/scheduler/MainScheduler.java#L97
+
+Getting item prices using one API call:
+Since this API method only has been added since EconomyShopGUI v6.3 and EconomyShopGUI Premium v5.6, it is required to use any version above this or support manually checking for item prices.
+
+Buy transaction
+Sell transaction
+This method automatically checks the following and returns an empty optional if not met:
+
+ShopItem is found inside shop (EconomyShopGUIHook#getShopItem(ItemStack) != null)
+
+ShopItem does not have an item error (ShopItem#hasItemError())
+
+ShopItem is not a display item (ShopItem#isDisplayItem())
+
+ShopItem is buyable (EconomyShopGUIHook#isBuyAble(ShopItem))
+
+Amount of items is smaller then maximum buy limit (ShopItem#isMaxBuy(int))
+
+If there is enough stock available (EconomyShopGUIHook#getItemStock(ShopItem, UUID))
+
+Checks only when the player is online (OfflinePlayer#isOnline())
+
+Player does have permissions for EconomyShopGUI.shop.<section>
+
+Player does have permissions for this specific shop item EconomyShopGUI.shop.<section>.item.<permission>
+
+Player does meet the requirements of this item
+
+
+Copy
+Optional<BuyPrice> optional = EconomyShopGUIHook.getBuyPrice(owner, new ItemStack(Material.COBBLESTONE));
+if (!optional.isPresent())
+    return -1;
+// The item was able to be sold, according all item limits
+BuyPrice price = optional.get();
+The above method returns a BuyPrice or SellPrice object if a shop item meets all requirements, which we will convert into the price of the item:
+
+Before returning the price of the item, it is required to update any stock limits present on the item.
+This should only be done if the item(s) are bought/sold from/to shop(not when this method is used to only check the price of the items).
+
+
+Copy
+price.updateLimits(); // Update all item limits set on items 
+After that, we can safely return the requested price(s):
+
+Since the premium version of the plugin supports multiple item prices per item, this method returns a Map with prices by default to ensure version compatibility.
+
+Multiple prices
+Single price
+If your code supports multiple prices, getting the Map of prices is as easy as:
+
+
+Copy
+return price.getPrices();
+Receiving the ShopItem object:
+Note that the player isn't a required argument, but using a player as argument automatically makes the API validate the following and return null if not met:
+
+Wether this ShopItem is sell able (EconomyShopGUIHook#isSellAble(ShopItem))
+
+Whether this ShopItem has a item error (ShopItem#hasItemError())
+
+Whether this ShopItem is a display item (ShopItem#isDisplayItem())
+
+Wether the player has permissions for this item (EconomyShopGUI.shop.<section>)
+
+The premium version of the API will also check for per item permissions
+
+Whether the player meets the shop item requirements (Premium only)
+
+
+Copy
+ShopItem shopItem = EconomyShopGUIHook.getShopItem(player, item);
+if(shopItem == null) {
+  return -1; // ShopItem does not exist/is not found, or the player doesn't have permissions
+}
+Getting the price of a ShopItem manually:
+The following method can be used to get the price for the player:
+
+Note that in EconomyShopGUI, items can have different economy types, and this method will always return the price of the current ShopItem's economy type.
+
+
+So it is important to always check for the ShopItem's economy type(ShopItem#getEcoType()) before adding it to a player's balances.
+
+Because for example, the returned amount could be experience points instead of Vault currency, and you do not want to mix them up when deposting the amount to the player's balance!
+
+It is recommended to use the API methods to deposit/withdraw the ShopItem's EcoType from the player.
+
+To completely support EconomyShopGUI's features:
+
+Shop items may have item limits, meaning that it is required to check for any limits before purchasing/selling the item thru the API because this may not be allowed by the configuration of this shop item. It is also required to update the limits after.
+
+Your code should check the following before purchasing items to completely support EconomyShopGUI's features:
+
+Max transaction limits
+
+Item stock/limits
+
+Multiple prices
+
+And after purchasing/selling items your code should:
+
+Update stock/limits
+
+Note that in EconomyShopGUI Premium, items can have multiple prices per item.
+And getting the item's primary price like below, will create errors.
+
+It is hardly recommended to retrieve an item's advanced pricing when using your API for public use!
+
+This method will also calculate any discounts/sell multipliers, pricing multipliers and dynamic pricing for the player.
+
+Buy price
+Sell price
+
+Copy
+/**
+* Gets an shop item's buy price.
+*
+* @param shopItem The shopItem to get the price from
+* @param player Player to check for multipliers
+* @param item The item to get the buy price for
+* @return The buy price of the item
+*/
+EconomyShopGUIHook.getItemBuyPrice(shopItem, item, player, item.getAmount());
+Max transaction limits:
+It is recommended to check for maximum transaction limits before purchasing/selling items thru the API, so your plugin respects any limits set on the shop item.
+Ignoring this might leave unexpected results when any limits are set.
+
+These max transaction limits are a maximum amount the player can purchase at once, it is not to be confused with limited stock which is a premium only feature.
+
+Buy transaction
+Sell transaction
+
+Copy
+shopItem.isMaxBuy(amountToBuy);
+This method returns a boolean, if this returns false, it means that the amount given as argument is larger then the maximum transaction amount, so the item should not be bought/sold and the action should be cancelled.
+
+Item stock/limits:
+Similar to max transaction limits, limited stock should be checked before the item can be bought/sold from the server, so your plugin respects any stock limits set on the shop item.
+Ignoring this might leave unexpected results when any limits are set.
+
+Altough this is a premium only feature, calls made to the API of the free version of EconomyShopGUI will simply return 0 to ensure version compatibility.
+
+Buy transaction
+Sell transaction
+
+Copy
+if (shopItem.getLimitedStockMode() != 0) {
+    int stock = EconomyShopGUIHook.getItemStock(shopItem, player.getUniqueId());
+    if (item.getAmount() > stock)
+        return -1; // Stock limit reached, the item may not be purchased
+}
+Multiple prices:
+ShopItems in EconomyShopGUI can have multiple prices per shop item, so it is required to also check for this before purchasing/selling any items to the server thru the API, so your plugin respects multiple prices set on the shop item.
+Ignoring this might leave unexpected results when any limits are set.
+
+Altough this is a premium only feature, calls made to the API of the free version of EconomyShopGUI will simply return false to ensure version compatibility.
+
+Buy transaction
+Sell transaction
+
+Copy
+Map<EcoType, Double> buyPrices;
+if (EconomyShopGUIHook.hasMultipleBuyPrices(shopItem)) {
+    Map<EcoType, Double> prices= !player.isOnline() ? EconomyShopGUIHook.getMultipleBuyPrices(shopItem).getBuyPrices(null, item.getAmount()) :
+            EconomyShopGUIHook.getMultipleBuyPrices(shopItem).getBuyPrices(null, (Player) player, item.getAmount());
+
+    buyPrices.addAll(prices);
+} else {
+    double buyPrice = !player.isOnline() ? EconomyShopGUIHook.getItemBuyPrice(shopItem, item.getAmount()) :
+            EconomyShopGUIHook.getItemBuyPrice(shopItem, (Player) player, item.getAmount());
+
+    buyPrices.put(shopItem.getEcoType(), buyPrice);
+}
+
+// Do something with the map of 'buyPrices'
+Since not all plugins support a map of prices inside their PricingProvider#getSellPrices(ItemStack) method call, and since this is a map of different EcoType's.
+
+It would be rather easy to get only the price of the supported economy type your plugin supports/uses. For example, plugins that rely on a Vault based price, calling something like below would do the trick of only getting the configured Vault price(if any);
+
+
+Copy
+double vaultPrice = buyPrices.getOrDefault(EconomyType.getFromString("VAULT"), -1d);
+Updating item stock:
+Because shop items can have stock/limits or dynamic pricing set, it is required to also update these values after your plugin purchases/sells items from the shop:
+
+Altough this is a premium only feature, calls made to the API of the free version of EconomyShopGUI will simply do nothing to ensure version compatibility.
+
+Buy transaction
+Sell transaction
+
+Copy
+if (this.shopItem.getLimitedStockMode() != 0)
+    EconomyShopGUIHook.buyItemStock(this.shopItem, this.player.getUniqueId(), this.amount);
+if (this.shopItem.isDynamicPricing())
+    EconomyShopGUIHook.buyItem(this.shopItem, this.amount);
+Using different EcoType's:
+Since there are multiple economy types for items, and we cannot expect every plugin to integrate with all of them.
+The API allows to interact using any registered economy providers, this can be any of the supported economy providers.
+
+
+Copy
+EcoType type = shopItem.getEcoType();
+EconomyProvider provider = EconomyShopGUIHook.getEcon(type);
+If you obtained the EconomyProvider object, you can do basic things like the following:
+
+Get the player's balance
+
+
+Copy
+Double balance = provider.getBalance(player);
+Deposit amounts
+
+
+Copy
+provider.depositBalance(player, amount);
+Withdraw amounts
+
+
+Copy
+provider.withdrawBalance(player, amount);
+Adding price modifiers to a specific player:
+Price modifiers modify the base price of a shop item by a percent, read more here
+
+Note that modifying a player's price modifiers only works if the player is online/loaded. If the player is offline, it is required to load the players modifiers from database first so they can be edited.
+
+Setting new player price modifiers:
+
+Setting new modifiers for players will override any if already set for that specific modifier
+
+For all items within a section:
+
+
+Copy
+EconomyShopGUIHook.setSectionPriceModifier(player.getUniqueID(), "Blocks", PriceModifierType.SELL, 120d);
+For a specific item within a section:
+
+
+Copy
+EconomyShopGUIHook.setItemPriceModifier(player.getUniqueID(), shopItem.getItemPath(), PriceModifierType.BUY, 50d)
+Removing player price modifiers:
+
+Developers may check if the section/item has this modifier for the specific player
+
+Removing modifiers for all items in a section:
+
+
+Copy
+EconomyShopGUIHook.removeSectionModifier(player.getUniqueID(), "Blocks", PriceModifierType.BUY);
+Removing modifiers for a specific item:
+
+
+Copy
+EconomyShopGUIHook.removeItemModifier(player.getUniqueID(), shopItem.getItemPath(), PriceModifierType.BOTH);
+Checking/retrieving all modifiers from a player:
+
+If the player isn't loaded or has no modifiers, this method will return null
+
+Getting modifiers for a loaded/online player
+
+
+Copy
+PlayerPriceModifier modifiers = EconomyShopGUIHook.getPlayerPriceModifiers(player.getUniqueID());
+Loading modifiers from database for a offline player
+
+
+Copy
+PlayerPriceModifier modifiers = EconomyShopGUIHook.loadPlayerPriceModifiers(player.getUniqueID());
+Events:
+The API contains two events as of now which can be used to track shop transactions.
+
+PreTransactionEvent:
+The PreTransactionEvent is called before any shop transaction.
+
+This allows you to cancel the event(transaction) or to modify the cost of the transaction by adding certain multipliers for example.
+
+PostTransactionEvent:
+The PostTransactionEvent is called after any shop transaction.
+This allows any plugin to listern and verify that a shop transaction has come thru and check the result of the transaction.
+
+For example this event is usefull on the DiscordSRV alerts.yml.
+
+Both events contain information about what ShopItem(s) have been bought/sold, how much items in total, the total cost of the transaction, the TransactionType and the player triggering the event.
+
+ShopItemsLoadEvent:
+If your plugin requires to interact on server start with a ShopItem object, you should listern and wait for the ShopItemsLoadEvent since this event will be called when the ShopItem's become available and are pre-loaded.
+

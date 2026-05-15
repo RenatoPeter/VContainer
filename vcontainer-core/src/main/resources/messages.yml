@@ -16,6 +16,12 @@ container:
   deposit: "{prefix} You put {amount} of {item} into the container."
   # Sent after items are withdrawn from a container. Placeholders: {amount}, {item}
   take: "{prefix} You took {amount} of {item} out of the container."
+  # Sent after items are sold from a container. Placeholders: {amount}, {item}, {price}
+  sell: "{prefix} You sold {amount} of {item} for {price}."
+  # Sent when the selected item cannot be sold with the active provider.
+  sell-unavailable: "{prefix} This item cannot be sold."
+  # Sent when the selected sell provider or currency provider is not available.
+  sell-provider-unavailable: "{prefix} The sell system is not available right now."
   # Sent when a withdraw action cannot fit into the player's inventory.
   inventory-full: "{prefix} Your inventory is full."
   # Sent when an item is rejected by storage limits or item blacklist settings.

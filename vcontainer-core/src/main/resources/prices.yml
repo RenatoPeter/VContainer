@@ -1,0 +1,13 @@
+# Local sell prices used when container-options.sell.provider is set to OWN.
+# Format: MATERIAL_NAME: unit sell price
+prices:
+  COBBLESTONE: 0.25
+  STONE: 0.30
+  DIRT: 0.05
+  OAK_LOG: 0.80
+  SPRUCE_LOG: 0.80
+  COAL: 1.25
+  IRON_INGOT: 4.50
+  GOLD_INGOT: 7.00
+  DIAMOND: 25.00
+  EMERALD: 18.00

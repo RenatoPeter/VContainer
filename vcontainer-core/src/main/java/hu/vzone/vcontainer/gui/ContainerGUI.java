@@ -8,6 +8,7 @@ import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageBlock;
+import hu.vzone.vcontainer.sell.SellService;
 import hu.vzone.vcontainer.utils.ConfigItemBuilder;
 import hu.vzone.vcontainer.utils.AuditLogger;
 import hu.vzone.vcontainer.utils.ItemUtils;
@@ -92,9 +93,11 @@ public class ContainerGUI {
         boolean allowWithdraw = plugin.getConfig().getBoolean("container-options.allow-withdraw", true);
         boolean depositMessages = plugin.getConfig().getBoolean("container-options.messages.deposit", true);
         boolean withdrawMessages = plugin.getConfig().getBoolean("container-options.messages.withdraw", true);
+        boolean sellMessages = plugin.getConfig().getBoolean("container-options.messages.sell", true);
         boolean shiftDepositAll = plugin.getConfig().getBoolean("container-options.shift-transfer.deposit-all", true);
-        boolean shiftWithdrawFit = plugin.getConfig().getBoolean("container-options.shift-transfer.withdraw-fit", true);
         boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+        SellService sellService = plugin.getSellService();
+        boolean sellEnabled = sellService != null && sellService.isSellEnabled();
 
         List<ItemStack> containerItems = manager.getAllItemFromContainer(ownerId);
         List<DisplayEntry> items = getDisplayEntries(containerItems, compactDisplay);
@@ -119,12 +122,15 @@ public class ContainerGUI {
             if (event.getClickedInventory() == null || !event.getClickedInventory().equals(player.getInventory())) return;
 
             if (event.getClick().isShiftClick() && shiftDepositAll) {
-                int deposited = depositInventory(player, ownerId, manager, plugin);
+                ItemStack clicked = event.getCurrentItem();
+                if (clicked == null || clicked.getType().isAir()) return;
+
+                int deposited = depositMatchingInventory(player, ownerId, manager, plugin, clicked);
                 if (deposited > 0) {
                     AuditLogger.log("container-deposit-bulk", player, ownerId.toString(), "amount=" + deposited);
                 }
                 if (deposited > 0 && depositMessages) {
-                    sendItemMessage(player, "container.deposit", "{prefix} You put {amount} of {item} into the container.", deposited, "items", ownerName);
+                    sendItemMessage(player, "container.deposit", "{prefix} You put {amount} of {item} into the container.", deposited, getItemName(clicked), ownerName);
                 }
                 Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
                 return;
@@ -189,16 +195,25 @@ public class ContainerGUI {
         }
 
         for (DisplayEntry entry : items) {
-            ItemStack snapshot = createDisplayItem(plugin, entry, compactDisplay, allowWithdraw);
+            ItemStack snapshot = createDisplayItem(plugin, viewer, entry, compactDisplay, allowWithdraw, sellEnabled);
             ItemStack target = entry.item().clone();
             target.setAmount(1);
 
             gui.addItem(ItemBuilder.from(snapshot).asGuiItem(event -> {
                 event.setCancelled(true);
                 if (!(event.getWhoClicked() instanceof Player player)) return;
+
+                if (sellEnabled && isConfiguredSellClick(plugin, event.getClick())) {
+                    handleSellClick(player, manager, ownerId, ownerName, entry, compactDisplay, event.getClick(), gui.getCurrentPageNum(), storageBlockManager, storageKey, sellMessages);
+                    return;
+                }
+
                 if (!allowWithdraw) return;
 
-                int requested = getWithdrawAmount(event.getClick(), entry, compactDisplay, shiftWithdrawFit, containerItems, target);
+                int requested = getWithdrawAmount(plugin, event.getClick(), entry, compactDisplay);
+                if (requested <= 0) {
+                    return;
+                }
                 int fit = getFitAmount(player.getInventory(), target, requested);
                 if (fit <= 0) {
                     send(player, "container.inventory-full", "{prefix} Your inventory is full.");
@@ -279,31 +294,23 @@ public class ContainerGUI {
         }
     }
 
-    private static int getWithdrawAmount(
-            ClickType click,
-            DisplayEntry entry,
-            boolean compactDisplay,
-            boolean shiftWithdrawFit,
-            List<ItemStack> containerItems,
-            ItemStack target
-    ) {
-        if (click.isShiftClick() && shiftWithdrawFit) return getTotalAmount(containerItems, target);
-        if (click == ClickType.MIDDLE) return target.getMaxStackSize();
-        if (click.isRightClick()) return 1;
-        return compactDisplay ? entry.amount() : entry.item().getAmount();
-    }
-
-    private static int getTotalAmount(List<ItemStack> items, ItemStack target) {
-        int amount = 0;
-        for (ItemStack item : items) {
-            if (ItemUtils.isSameItemWithNBT(item, target)) {
-                amount += item.getAmount();
-            }
+    private static int getWithdrawAmount(VContainer plugin, ClickType click, DisplayEntry entry, boolean compactDisplay) {
+        if (isCompactLineEnabled(plugin, "withdraw-all", "withdraw-all", true)
+                && matchesConfiguredAction(plugin, click, "withdraw-all", "withdraw-all")) {
+            return compactDisplay ? entry.amount() : entry.item().getAmount();
         }
-        return amount;
+        if (isCompactLineEnabled(plugin, "withdraw", "withdraw-one", true)
+                && matchesConfiguredAction(plugin, click, "withdraw", "withdraw-one")) {
+            return 1;
+        }
+        if (isCompactLineEnabled(plugin, "withdraw-stack", "withdraw-stack", true)
+                && matchesConfiguredAction(plugin, click, "withdraw-stack", "withdraw-stack")) {
+            return Math.min(entry.item().getMaxStackSize(), compactDisplay ? entry.amount() : entry.item().getAmount());
+        }
+        return 0;
     }
 
-    private static int depositInventory(Player player, UUID ownerId, ContainerManager manager, VContainer plugin) {
+    private static int depositMatchingInventory(Player player, UUID ownerId, ContainerManager manager, VContainer plugin, ItemStack template) {
         PlayerInventory inventory = player.getInventory();
         ItemStack[] storage = inventory.getStorageContents();
         int deposited = 0;
@@ -311,6 +318,7 @@ public class ContainerGUI {
         for (int i = 0; i < storage.length; i++) {
             ItemStack item = storage[i];
             if (item == null || item.getType().isAir()) continue;
+            if (!ItemUtils.isSameItemWithNBT(item, template)) continue;
 
             int added = manager.addItemToContainer(ownerId, item.clone());
             if (added <= 0) continue;
@@ -325,12 +333,12 @@ public class ContainerGUI {
         inventory.setStorageContents(storage);
 
         if (plugin.getConfig().getBoolean("container-options.shift-transfer.include-armor", false)) {
-            deposited += depositArmor(inventory, ownerId, manager);
+            deposited += depositMatchingArmor(inventory, ownerId, manager, template);
         }
 
         if (plugin.getConfig().getBoolean("container-options.shift-transfer.include-offhand", false)) {
             ItemStack offhand = inventory.getItemInOffHand();
-            if (offhand != null && !offhand.getType().isAir()) {
+            if (offhand != null && !offhand.getType().isAir() && ItemUtils.isSameItemWithNBT(offhand, template)) {
                 int added = manager.addItemToContainer(ownerId, offhand.clone());
                 if (added > 0) {
                     deposited += added;
@@ -346,12 +354,13 @@ public class ContainerGUI {
         return deposited;
     }
 
-    private static int depositArmor(PlayerInventory inventory, UUID ownerId, ContainerManager manager) {
+    private static int depositMatchingArmor(PlayerInventory inventory, UUID ownerId, ContainerManager manager, ItemStack template) {
         ItemStack[] armor = inventory.getArmorContents();
         int deposited = 0;
         for (int i = 0; i < armor.length; i++) {
             ItemStack item = armor[i];
             if (item == null || item.getType().isAir()) continue;
+            if (!ItemUtils.isSameItemWithNBT(item, template)) continue;
 
             int added = manager.addItemToContainer(ownerId, item.clone());
             if (added <= 0) continue;
@@ -755,7 +764,7 @@ public class ContainerGUI {
                 .replace("{next-mode}", sortMode.next().displayName()));
     }
 
-    private static ItemStack createDisplayItem(VContainer plugin, DisplayEntry entry, boolean compactDisplay, boolean allowWithdraw) {
+    private static ItemStack createDisplayItem(VContainer plugin, Player viewer, DisplayEntry entry, boolean compactDisplay, boolean allowWithdraw, boolean sellEnabled) {
         ItemStack item = entry.item().clone();
         if (compactDisplay) {
             item.setAmount(1);
@@ -765,7 +774,7 @@ public class ContainerGUI {
                         ? new ArrayList<>(meta.getLore())
                         : new ArrayList<>();
 
-                lore.addAll(createCompactLore(plugin, entry.amount(), allowWithdraw));
+                lore.addAll(createCompactLore(plugin, viewer, entry, allowWithdraw, sellEnabled));
 
                 meta.setLore(lore);
                 item.setItemMeta(meta);
@@ -774,7 +783,8 @@ public class ContainerGUI {
         return item;
     }
 
-    private static List<String> createCompactLore(VContainer plugin, int amount, boolean allowWithdraw) {
+    private static List<String> createCompactLore(VContainer plugin, Player viewer, DisplayEntry entry, boolean allowWithdraw, boolean sellEnabled) {
+        int amount = entry.amount();
         String amountLine = getCompactLine(plugin, "size", "amount", true, "&7Item stack size: &f{amount}")
                 .replace("{amount}", String.valueOf(amount));
         if (!isCompactLineEnabled(plugin, "size", "amount", true)) amountLine = "";
@@ -788,6 +798,38 @@ public class ContainerGUI {
         String withdrawStackLine = allowWithdraw && isCompactLineEnabled(plugin, "withdraw-stack", "withdraw-stack", true)
                 ? getCompactLine(plugin, "withdraw-stack", "withdraw-stack", true, "&eMiddle click to withdraw 1 stack")
                 : "";
+
+        SellPreview preview = createSellPreview(plugin, viewer, entry, sellEnabled);
+        boolean showSellFormat = preview.showLore();
+        String sellAllLine = showSellFormat && isCompactLineEnabled(plugin, "sell-all", "sell-all", true)
+                ? getCompactLine(plugin, "sell-all", "sell-all", true, "&eShift + Left click to sell all &8(&6%price-all%&8)")
+                .replace("%price-all%", preview.allPrice())
+                : "";
+        String sellOneLine = showSellFormat && isCompactLineEnabled(plugin, "sell", "sell", true)
+                ? getCompactLine(plugin, "sell", "sell", true, "&eShift + Right click to sell 1 &8(&6%price-one%&8)")
+                .replace("%price-one%", preview.onePrice())
+                : "";
+        String sellStackLine = showSellFormat && isCompactLineEnabled(plugin, "sell-stack", "sell-stack", true)
+                ? getCompactLine(plugin, "sell-stack", "sell-stack", true, "&eCtrl + Q to sell 1 stack &8(&6%price-stack%&8)")
+                .replace("%price-stack%", preview.stackPrice())
+                : "";
+
+        List<String> sellFormat = plugin.getConfig().getStringList("container-options.compact-display.sell-format");
+        if (sellFormat.isEmpty()) {
+            sellFormat = List.of("", "%sell-all-line%", "%sell-one-line%", "%sell-stack-line%", "");
+        }
+        List<String> resolvedSellFormat = new ArrayList<>();
+        if (showSellFormat) {
+            for (String line : sellFormat) {
+                String formatted = line
+                        .replace("%sell-all-line%", sellAllLine)
+                        .replace("%sell-one-line%", sellOneLine)
+                        .replace("%sell-stack-line%", sellStackLine);
+                if (!formatted.isEmpty() || line.isEmpty()) {
+                    resolvedSellFormat.add(VContainer.formatMessage(formatted));
+                }
+            }
+        }
 
         List<String> format = plugin.getConfig().getStringList("container-options.compact-display.format");
         if (format.isEmpty()) {
@@ -806,7 +848,17 @@ public class ContainerGUI {
                     .replace("%amount-line%", amountLine)
                     .replace("%withdraw-all-line%", withdrawAllLine)
                     .replace("%withdraw-one-line%", withdrawOneLine)
-                    .replace("%withdraw-stack-line%", withdrawStackLine);
+                    .replace("%withdraw-stack-line%", withdrawStackLine)
+                    .replace("%sell-format%", String.join("\n", resolvedSellFormat));
+            if (formatted.contains("\n")) {
+                boolean preserveBlank = line.isEmpty() || line.contains("%sell-format%");
+                for (String split : formatted.split("\n", -1)) {
+                    if (!split.isEmpty() || preserveBlank) {
+                        lore.add(VContainer.formatMessage(split));
+                    }
+                }
+                continue;
+            }
             if (!formatted.isEmpty() || line.isEmpty()) {
                 lore.add(VContainer.formatMessage(formatted));
             }
@@ -882,10 +934,165 @@ public class ContainerGUI {
                 .replace("{player}", ownerName)));
     }
 
+    private static void sendSellMessage(Player player, int amount, String itemName, String ownerName, String price) {
+        if (!PermissionUtils.has(player, "vcontainer.notify")) return;
+
+        VContainer plugin = VContainer.getInstance();
+        String message = plugin.getMessageConfig().getString("container.sell", "{prefix} You sold {amount} of {item} for {price}.");
+        player.sendMessage(VContainer.formatMessage(player, message
+                .replace("{amount}", String.valueOf(amount))
+                .replace("{item}", itemName)
+                .replace("{player}", ownerName)
+                .replace("{price}", price)));
+    }
+
+    private static int getSellAmount(VContainer plugin, ClickType click, DisplayEntry entry, boolean compactDisplay) {
+        if (isCompactLineEnabled(plugin, "sell", "sell", true)
+                && matchesConfiguredAction(plugin, click, "sell", "sell")) {
+            return 1;
+        }
+        if (isCompactLineEnabled(plugin, "sell-stack", "sell-stack", true)
+                && matchesConfiguredAction(plugin, click, "sell-stack", "sell-stack")) {
+            return Math.min(entry.item().getMaxStackSize(), compactDisplay ? entry.amount() : entry.item().getAmount());
+        }
+        if (isCompactLineEnabled(plugin, "sell-all", "sell-all", true)
+                && matchesConfiguredAction(plugin, click, "sell-all", "sell-all")) {
+            return compactDisplay ? entry.amount() : entry.item().getAmount();
+        }
+        return 0;
+    }
+
+    private static void handleSellClick(
+            Player player,
+            ContainerManager manager,
+            UUID ownerId,
+            String ownerName,
+            DisplayEntry entry,
+            boolean compactDisplay,
+            ClickType click,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey,
+            boolean sellMessages
+    ) {
+        VContainer plugin = VContainer.getInstance();
+        SellService sellService = plugin.getSellService();
+        if (sellService == null || !sellService.isSellEnabled()) {
+            Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            return;
+        }
+
+        int requested = getSellAmount(plugin, click, entry, compactDisplay);
+        if (requested <= 0) {
+            Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            return;
+        }
+        SellService.SellResult result = sellService.sell(player, manager, ownerId, entry.item(), requested);
+        if (!result.success()) {
+            String path = result.reason() == SellService.UnavailableReason.NO_PRICE
+                    ? "container.sell-unavailable"
+                    : "container.sell-provider-unavailable";
+            String fallback = result.reason() == SellService.UnavailableReason.NO_PRICE
+                    ? "{prefix} This item cannot be sold."
+                    : "{prefix} The sell system is not available right now.";
+            send(player, path, fallback);
+            Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            return;
+        }
+
+        ItemStack soldItem = entry.item().clone();
+        soldItem.setAmount(result.amount());
+        AuditLogger.log("container-sell", player, ownerId.toString(), "amount=" + result.amount() + " item=" + getItemName(soldItem) + " price=" + result.totalPrice());
+        if (sellMessages) {
+            sendSellMessage(player, result.amount(), getItemName(soldItem), ownerName, result.formattedPrice());
+        }
+
+        Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+    }
+
+    private static SellPreview createSellPreview(VContainer plugin, Player viewer, DisplayEntry entry, boolean sellEnabled) {
+        if (!sellEnabled || viewer == null) {
+            return SellPreview.hidden();
+        }
+
+        SellService sellService = plugin.getSellService();
+        if (sellService == null || !sellService.isSellEnabled()) {
+            return SellPreview.hidden();
+        }
+
+        int allAmount = entry.amount();
+        int stackAmount = Math.min(entry.item().getMaxStackSize(), allAmount);
+        SellService.SellQuote allQuote = sellService.quote(viewer, entry.item(), allAmount);
+        SellService.SellQuote oneQuote = sellService.quote(viewer, entry.item(), 1);
+        SellService.SellQuote stackQuote = sellService.quote(viewer, entry.item(), stackAmount);
+        boolean showWithoutPrice = plugin.getConfig().getBoolean("container-options.compact-display.show-sell-format-without-price", false);
+        boolean anySellable = allQuote.sellable() || oneQuote.sellable() || stackQuote.sellable();
+        if (!anySellable && !showWithoutPrice) {
+            return SellPreview.hidden();
+        }
+
+        String unavailable = sellService.unavailablePricePlaceholder();
+        return new SellPreview(
+                true,
+                allQuote.sellable() ? allQuote.formattedPrice() : unavailable,
+                oneQuote.sellable() ? oneQuote.formattedPrice() : unavailable,
+                stackQuote.sellable() ? stackQuote.formattedPrice() : unavailable
+        );
+    }
+
+    private static boolean matchesConfiguredAction(VContainer plugin, ClickType actualClick, String section, String legacyPrefix) {
+        return configuredAction(plugin, section, legacyPrefix) == GuiClickAction.fromClickType(actualClick);
+    }
+
+    private static boolean isConfiguredSellClick(VContainer plugin, ClickType actualClick) {
+        return isCompactLineEnabled(plugin, "sell-all", "sell-all", true)
+                && matchesConfiguredAction(plugin, actualClick, "sell-all", "sell-all")
+                || isCompactLineEnabled(plugin, "sell", "sell", true)
+                && matchesConfiguredAction(plugin, actualClick, "sell", "sell")
+                || isCompactLineEnabled(plugin, "sell-stack", "sell-stack", true)
+                && matchesConfiguredAction(plugin, actualClick, "sell-stack", "sell-stack");
+    }
+
+    private static GuiClickAction configuredAction(VContainer plugin, String section, String legacyPrefix) {
+        String base = "container-options.compact-display.";
+        String configured = plugin.getConfig().getString(base + section + ".action");
+        if (configured != null && !configured.isBlank()) {
+            return GuiClickAction.fromConfig(configured);
+        }
+        return switch (section) {
+            case "withdraw-all" -> GuiClickAction.LEFT_CLICK;
+            case "withdraw" -> GuiClickAction.RIGHT_CLICK;
+            case "withdraw-stack" -> GuiClickAction.MIDDLE_CLICK;
+            case "sell-all" -> GuiClickAction.SHIFT_LEFT_CLICK;
+            case "sell" -> GuiClickAction.SHIFT_RIGHT_CLICK;
+            case "sell-stack" -> GuiClickAction.ITEM_DROP;
+            default -> GuiClickAction.NONE;
+        };
+    }
+
     private static String getItemName(ItemStack item) {
         return item.hasItemMeta() && item.getItemMeta().hasDisplayName()
                 ? item.getItemMeta().getDisplayName()
-                : item.getType().name();
+                : formatMaterialName(item.getType());
+    }
+
+    private static String formatMaterialName(Material material) {
+        return switch (material) {
+            case REDSTONE -> "Redstone Dust";
+            default -> {
+                String[] parts = material.name().toLowerCase().split("_");
+                StringBuilder builder = new StringBuilder();
+                for (int i = 0; i < parts.length; i++) {
+                    if (parts[i].isEmpty()) continue;
+                    if (builder.length() > 0) builder.append(' ');
+                    builder.append(Character.toUpperCase(parts[i].charAt(0)));
+                    if (parts[i].length() > 1) {
+                        builder.append(parts[i].substring(1));
+                    }
+                }
+                yield builder.toString();
+            }
+        };
     }
 
     private enum SortMode {
@@ -926,5 +1133,58 @@ public class ContainerGUI {
             StorageBlockManager storageBlockManager,
             String storageKey
     ) {
+    }
+
+    private record SellPreview(boolean showLore, String allPrice, String onePrice, String stackPrice) {
+
+        private static SellPreview hidden() {
+            return new SellPreview(false, "", "", "");
+        }
+    }
+
+    private enum GuiClickAction {
+        NONE,
+        RIGHT_CLICK,
+        LEFT_CLICK,
+        MIDDLE_CLICK,
+        SHIFT_RIGHT_CLICK,
+        SHIFT_LEFT_CLICK,
+        ITEM_DROP,
+        HAND_SWAP;
+
+        private static GuiClickAction fromConfig(String raw) {
+            if (raw == null) {
+                return NONE;
+            }
+            String normalized = raw
+                    .trim()
+                    .toUpperCase()
+                    .replace('_', ' ')
+                    .replace('-', ' ')
+                    .replaceAll("\\s+", " ");
+            return switch (normalized) {
+                case "RIGHT CLICK" -> RIGHT_CLICK;
+                case "LEFT CLICK" -> LEFT_CLICK;
+                case "MIDDLE CLICK" -> MIDDLE_CLICK;
+                case "SHIFT + RIGHT CLICK", "SHIFT RIGHT CLICK" -> SHIFT_RIGHT_CLICK;
+                case "SHIFT + LEFT CLICK", "SHIFT LEFT CLICK" -> SHIFT_LEFT_CLICK;
+                case "ITEM DROP", "DROP" -> ITEM_DROP;
+                case "HAND SWAP", "SWAP OFFHAND", "OFFHAND SWAP" -> HAND_SWAP;
+                default -> NONE;
+            };
+        }
+
+        private static GuiClickAction fromClickType(ClickType clickType) {
+            return switch (clickType) {
+                case RIGHT -> RIGHT_CLICK;
+                case LEFT -> LEFT_CLICK;
+                case MIDDLE -> MIDDLE_CLICK;
+                case SHIFT_RIGHT -> SHIFT_RIGHT_CLICK;
+                case SHIFT_LEFT -> SHIFT_LEFT_CLICK;
+                case DROP -> ITEM_DROP;
+                case SWAP_OFFHAND -> HAND_SWAP;
+                default -> NONE;
+            };
+        }
     }
 }

@@ -25,6 +25,8 @@ container-options:
     deposit: true
     # Sends a message after manual item withdrawal.
     withdraw: true
+    # Sends a message after selling items from the container.
+    sell: true
 
   # Shift-click bulk transfer settings.
   shift-transfer:
@@ -42,6 +44,17 @@ container-options:
     # If true, the offhand slot is included in shift deposit-all.
     include-offhand: false
 
+  # Item selling settings inside the container GUI.
+  sell:
+    # Available options: NONE, OWN, ECONOMYSHOPGUI, SHOPGUIPLUS
+    provider: NONE
+
+    # Currently supported currency providers: VAULT
+    currency-provider: VAULT
+
+    # Placeholder text used when a price is missing but the sell lore is still shown.
+    unavailable-price-placeholder: "&cN/A"
+
   # Compact display merges equal stored items visually into one icon.
   # This does not remove the stored item data; it only changes how the GUI shows it.
   compact-display:
@@ -53,28 +66,77 @@ container-options:
       # If true, the size line can be inserted into the compact lore format.
       enable: true
       # Lore text. Placeholder: {amount}
-      line: "&7Item stack size: &f{amount}"
+      line: "&7Item stack size: &b{amount}"
 
     # Left-click withdraw-all lore line.
     withdraw-all:
       # If true, the withdraw-all line can be inserted into the compact lore format.
       enable: true
       # Lore text shown for withdrawing every matching item.
-      line: "&eLeft click to withdraw all"
+      line: "&bLeft click &8» &7Withdraw all"
+      # Supported values:
+      # RIGHT CLICK, LEFT CLICK, MIDDLE CLICK,
+      # SHIFT + RIGHT CLICK, SHIFT + LEFT CLICK,
+      # ITEM DROP, HAND SWAP
+      action: "LEFT CLICK"
 
     # Right-click withdraw-one lore line.
     withdraw:
       # If true, the withdraw-one line can be inserted into the compact lore format.
       enable: true
       # Lore text shown for withdrawing one item.
-      line: "&eRight click to withdraw 1"
+      line: "&bRight click &8» &7Withdraw 1"
+      action: "RIGHT CLICK"
 
     # Middle-click withdraw-stack lore line.
     withdraw-stack:
       # If true, the withdraw-stack line can be inserted into the compact lore format.
       enable: true
       # Lore text shown for withdrawing one normal Minecraft stack.
-      line: "&eMiddle click to withdraw 1 stack"
+      line: "&bMiddle click &8» &7Withdraw 1 stack"
+      action: "MIDDLE CLICK"
+
+    # Shift-left sell-all lore line.
+    sell-all:
+      # If true, the sell-all line can be inserted into the compact lore format.
+      enable: true
+      # Lore text shown for selling the full displayed amount.
+      line: "&bShift + Left click &8» &7Sell all &8(&3%price-all%&8)"
+      action: "SHIFT + LEFT CLICK"
+
+    # Shift-right sell-one lore line.
+    sell:
+      # If true, the sell-one line can be inserted into the compact lore format.
+      enable: true
+      # Lore text shown for selling one item.
+      line: "&bShift + Right click &8» &7Sell 1 &8(&3%price-one%&8)"
+      action: "SHIFT + RIGHT CLICK"
+
+    # Stack sell lore line.
+    # Minecraft inventory clicks do not expose Shift + Middle reliably,
+    # so VContainer uses Ctrl + Q / Control-Drop for the stack sell action.
+    sell-stack:
+      # If true, the sell-stack line can be inserted into the compact lore format.
+      enable: true
+      # Lore text shown for selling one normal Minecraft stack.
+      line: "&bQ (Drop) &8» &7Sell 1 stack &8(&3%price-stack%&8)"
+      action: "ITEM DROP"
+
+    # Optional sell section inserted into the main compact lore format.
+    # Placeholders:
+    # - %sell-all-line%
+    # - %sell-one-line%
+    # - %sell-stack-line%
+    sell-format:
+      - ""
+      - "%sell-all-line%"
+      - "%sell-one-line%"
+      - "%sell-stack-line%"
+      - ""
+
+    # If false, the sell-format is hidden for items that do not have a sell price.
+    # If true, the sell-format still appears and uses the unavailable price placeholder.
+    show-sell-format-without-price: false
 
     # Lore layout used for compact items.
     # Empty strings create blank lore lines.
@@ -83,15 +145,19 @@ container-options:
     # - %withdraw-all-line%
     # - %withdraw-one-line%
     # - %withdraw-stack-line%
+    # - %sell-format%
     # Disabled sections are skipped automatically.
     format:
       - ""
-      - "&8----------"
+      - "&7[&b✥&7]&m&l----|--------|----&7[&b✥&7]"
+      - ""
       - "%amount-line%"
+      - ""
       - "%withdraw-all-line%"
-      - "%withdraw-one-line%"
       - "%withdraw-stack-line%"
-      - "&8----------"
+      - "%withdraw-one-line%"
+      - "%sell-format%"
+      - "&7[&b✥&7]&m&l----|--------|----&7[&b✥&7]"
 
 # Global and personal storage block settings.
 storage-block:

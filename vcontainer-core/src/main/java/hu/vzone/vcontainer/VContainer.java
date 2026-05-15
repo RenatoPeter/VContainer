@@ -8,6 +8,7 @@ import hu.vzone.vcontainer.commands.ContainerAdminCommand;
 import hu.vzone.vcontainer.commands.ContainerCommand;
 import hu.vzone.vcontainer.listeners.ContainerListener;
 import hu.vzone.vcontainer.managers.ContainerManager;
+import hu.vzone.vcontainer.sell.SellService;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.storage.StorageSettings;
 import hu.vzone.vcontainer.utils.ConfigUpdater;
@@ -50,11 +51,14 @@ public final class VContainer extends JavaPlugin {
     private File databaseConfigFile;
     private FileConfiguration databaseConfig;
     private FileConfiguration migrationConfig;
+    private File pricesConfigFile;
+    private FileConfiguration pricesConfig;
     private final Map<String, FileConfiguration> menuConfigs = new HashMap<>();
     private Gson gson;
     private File playerDataFolder;
     private ContainerManager containerManager;
     private StorageBlockManager storageBlockManager;
+    private SellService sellService;
     private volatile boolean restartRequired;
     private volatile String restartReason = "";
 
@@ -69,6 +73,7 @@ public final class VContainer extends JavaPlugin {
         updateDefaultConfig();
         createDatabaseConfig();
         createMigrationConfig();
+        createPricesConfig();
         createMessageConfig();
         createMenuConfigs();
 
@@ -79,6 +84,7 @@ public final class VContainer extends JavaPlugin {
 
         containerManager = new ContainerManager(this);
         storageBlockManager = new StorageBlockManager(this, containerManager);
+        sellService = new SellService(this);
         api = new VContainerAPIImpl(this, containerManager, storageBlockManager);
 
         Bukkit.getServicesManager().register(VContainerAPI.class, api, this, ServicePriority.Normal);
@@ -184,6 +190,14 @@ public final class VContainer extends JavaPlugin {
         return migrationConfig;
     }
 
+    public FileConfiguration getPricesConfig() {
+        return pricesConfig;
+    }
+
+    public SellService getSellService() {
+        return sellService;
+    }
+
     public FileConfiguration getMenuConfig(String name) {
         return menuConfigs.get(name);
     }
@@ -192,6 +206,10 @@ public final class VContainer extends JavaPlugin {
         File configFile = new File(getDataFolder(), "config.yml");
         ConfigUpdater.load(this, "config.yml", configFile);
         reloadConfig();
+    }
+
+    public void reloadMainConfig() {
+        updateDefaultConfig();
     }
 
     private void createMessageConfig() {
@@ -207,6 +225,15 @@ public final class VContainer extends JavaPlugin {
     private void createMigrationConfig() {
         File migrationConfigFile = new File(getDataFolder(), "migration.yml");
         migrationConfig = ConfigUpdater.load(this, "migration.yml", migrationConfigFile);
+    }
+
+    private void createPricesConfig() {
+        pricesConfigFile = new File(getDataFolder(), "prices.yml");
+        if (!pricesConfigFile.exists()) {
+            pricesConfigFile.getParentFile().mkdirs();
+            saveResource("prices.yml", false);
+        }
+        pricesConfig = YamlConfiguration.loadConfiguration(pricesConfigFile);
     }
 
     private void createMenuConfigs() {
@@ -227,13 +254,26 @@ public final class VContainer extends JavaPlugin {
     }
 
     public void reloadMessageConfig() {
-        if (messageConfigFile.exists()) {
-            messageConfig = YamlConfiguration.loadConfiguration(messageConfigFile);
+        messageConfig = ConfigUpdater.load(this, "messages.yml", messageConfigFile);
+    }
+
+    public void reloadDatabaseConfig() {
+        databaseConfig = ConfigUpdater.load(this, "database.yml", databaseConfigFile);
+    }
+
+    public void reloadMigrationConfig() {
+        File file = new File(getDataFolder(), "migration.yml");
+        migrationConfig = ConfigUpdater.load(this, "migration.yml", file);
+    }
+
+    public void reloadPricesConfig() {
+        if (pricesConfigFile.exists()) {
+            pricesConfig = YamlConfiguration.loadConfiguration(pricesConfigFile);
             return;
         }
 
-        Bukkit.getConsoleSender().sendMessage(ChatColor.RED + "[VContainer] messages.yml not found.");
-        createMessageConfig();
+        Bukkit.getConsoleSender().sendMessage(ChatColor.RED + "[VContainer] prices.yml not found.");
+        createPricesConfig();
     }
 
     public String getPrefix() {
