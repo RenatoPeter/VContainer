@@ -220,8 +220,20 @@ storage-block:
   hologram:
     # Enables or disables storage block holograms.
     enabled: true
-    # Vertical offset above the block.
+    # Vertical offset above the storage block.
+    y-offset: 1.35
+    # Legacy alias kept for backward compatibility.
     height: 1.35
+    # Maximum holograms refreshed per tick during reload/startup.
+    refresh-batch-size: 50
+    # TextDisplay background mode.
+    # none    = no background
+    # default = Minecraft default text background
+    # custom  = use background-color below
+    background-type: custom
+    # Custom background color for background-type: custom.
+    # Format: #AARRGGBB or #RRGGBB. If alpha is not provided, 80 is used.
+    background-color: "#50000000"
     # If true, the text can be seen through blocks.
     see-through: false
     # If true, Minecraft renders text shadow.
@@ -281,3 +293,9 @@ audit:
   max-file-size-bytes: 10485760
   # File path relative to plugins/VContainer.
   file: audit.log
+
+# ============================================================================
+# Update Checker
+# ============================================================================
+update-checker:
+  enabled: true

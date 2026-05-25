@@ -82,6 +82,7 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                 plugin.reloadPricesConfig();
                 plugin.reloadMenuConfigs();
                 storageBlockManager.reload();
+                plugin.getUpdateChecker().checkAsync();
                 sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.reload", "{prefix} Plugin successfully reloaded!")));
                 return true;
 

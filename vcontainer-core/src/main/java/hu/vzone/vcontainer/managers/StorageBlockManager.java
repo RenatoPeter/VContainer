@@ -13,6 +13,7 @@ import hu.vzone.vcontainer.utils.PermissionUtils;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
+import org.bukkit.Color;
 import org.bukkit.Location;
 import org.bukkit.Material;
 import org.bukkit.World;
@@ -84,6 +85,7 @@ public class StorageBlockManager {
     private long blockMutationVersion;
     private BukkitTask hopperTask;
     private BukkitTask autoSaveTask;
+    private BukkitTask hologramRefreshTask;
     private int hopperCursor;
     private volatile boolean persistenceSuspended;
 
@@ -371,15 +373,41 @@ public class StorageBlockManager {
     }
 
     public void reloadHolograms() {
+        if (hologramRefreshTask != null) {
+            hologramRefreshTask.cancel();
+            hologramRefreshTask = null;
+        }
         removeAllHolograms();
+        if (!plugin.getConfig().getBoolean("storage-block.hologram.enabled", true)) return;
+
+        List<Location> pending = new ArrayList<>();
         for (String key : globalBlocks.keySet()) {
             Location location = locationFromKey(key);
-            if (location != null && location.isChunkLoaded()) spawnHologram(location);
+            if (location != null && location.isChunkLoaded()) pending.add(location);
         }
         for (String key : personalBlocks.keySet()) {
             Location location = locationFromKey(key);
-            if (location != null && location.isChunkLoaded()) spawnHologram(location);
+            if (location != null && location.isChunkLoaded()) pending.add(location);
         }
+        if (pending.isEmpty()) return;
+
+        int batchSize = Math.max(1, plugin.getConfig().getInt("storage-block.hologram.refresh-batch-size", 50));
+        hologramRefreshTask = Bukkit.getScheduler().runTaskTimer(plugin, new Runnable() {
+            private int index;
+
+            @Override
+            public void run() {
+                int processed = 0;
+                while (index < pending.size() && processed < batchSize) {
+                    spawnHologram(pending.get(index++));
+                    processed++;
+                }
+                if (index >= pending.size() && hologramRefreshTask != null) {
+                    hologramRefreshTask.cancel();
+                    hologramRefreshTask = null;
+                }
+            }
+        }, 0L, 1L);
     }
 
     public void reload() {
@@ -396,6 +424,10 @@ public class StorageBlockManager {
     }
 
     public void removeAllHolograms() {
+        if (hologramRefreshTask != null) {
+            hologramRefreshTask.cancel();
+            hologramRefreshTask = null;
+        }
         for (String key : new ArrayList<>(holograms.keySet())) {
             Location location = locationFromKey(key);
             if (location != null) {
@@ -404,6 +436,7 @@ public class StorageBlockManager {
                 holograms.remove(key);
             }
         }
+        purgeOrphanHolograms();
         holograms.clear();
     }
 
@@ -418,6 +451,7 @@ public class StorageBlockManager {
     public void shutdown() {
         if (hopperTask != null) hopperTask.cancel();
         if (autoSaveTask != null) autoSaveTask.cancel();
+        if (hologramRefreshTask != null) hologramRefreshTask.cancel();
         if (!persistenceSuspended) flushDirtyBlocksSync();
         removeAllHolograms();
         if (sqlDataSource != null) sqlDataSource.close();
@@ -991,7 +1025,7 @@ public class StorageBlockManager {
 
         Location hologramLocation = blockLocation.clone().add(
                 0.5,
-                plugin.getConfig().getDouble("storage-block.hologram.height", 1.35),
+                hologramYOffset(),
                 0.5
         );
 
@@ -1001,17 +1035,20 @@ public class StorageBlockManager {
         display.setBillboard(Display.Billboard.CENTER);
         display.setSeeThrough(plugin.getConfig().getBoolean("storage-block.hologram.see-through", false));
         display.setShadowed(plugin.getConfig().getBoolean("storage-block.hologram.shadow", true));
+        applyHologramBackground(display);
         display.text(hologramText(blockLocation));
 
         holograms.put(key(blockLocation), display.getUniqueId());
     }
 
     private void removeHologram(Location blockLocation) {
-        UUID uuid = holograms.remove(key(blockLocation));
+        String blockKey = key(blockLocation);
+        UUID uuid = holograms.remove(blockKey);
         if (uuid != null) {
             Entity entity = Bukkit.getEntity(uuid);
             if (entity != null) entity.remove();
         }
+        removeTaggedHolograms(blockLocation.getWorld(), blockKey);
     }
 
     private Component hologramText(Location location) {
@@ -1045,7 +1082,11 @@ public class StorageBlockManager {
     }
 
     private String tagFor(Location location) {
-        return "vcontainer_storage_" + key(location).replace(",", "_").replace("-", "m");
+        return tagForKey(key(location));
+    }
+
+    private String tagForKey(String key) {
+        return "vcontainer_storage_" + key.replace(",", "_").replace("-", "m");
     }
 
     private Location locationFromKey(String key) {
@@ -1075,6 +1116,81 @@ public class StorageBlockManager {
                 spawnHologram(location);
             } else {
                 removeHologram(location);
+            }
+        }
+    }
+
+    private double hologramYOffset() {
+        if (plugin.getConfig().contains("storage-block.hologram.y-offset")) {
+            return plugin.getConfig().getDouble("storage-block.hologram.y-offset", 1.35);
+        }
+        return plugin.getConfig().getDouble("storage-block.hologram.height", 1.35);
+    }
+
+    private void applyHologramBackground(TextDisplay display) {
+        String type = plugin.getConfig().getString("storage-block.hologram.background-type", "custom");
+        if (type == null) type = "custom";
+
+        switch (type.trim().toLowerCase()) {
+            case "none" -> {
+                display.setDefaultBackground(false);
+                display.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+            }
+            case "default" -> display.setDefaultBackground(true);
+            case "custom" -> {
+                display.setDefaultBackground(false);
+                display.setBackgroundColor(parseBackgroundColor(
+                        plugin.getConfig().getString("storage-block.hologram.background-color", "#50000000")
+                ));
+            }
+            default -> display.setDefaultBackground(true);
+        }
+    }
+
+    private Color parseBackgroundColor(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return Color.fromARGB(0x50, 0x00, 0x00, 0x00);
+        }
+
+        String value = raw.trim();
+        if (value.startsWith("#")) value = value.substring(1);
+        try {
+            if (value.length() == 6) {
+                int rgb = Integer.parseInt(value, 16);
+                return Color.fromARGB(0x80, (rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+            }
+            if (value.length() == 8) {
+                long argb = Long.parseLong(value, 16);
+                return Color.fromARGB(
+                        (int) ((argb >> 24) & 0xFF),
+                        (int) ((argb >> 16) & 0xFF),
+                        (int) ((argb >> 8) & 0xFF),
+                        (int) (argb & 0xFF)
+                );
+            }
+        } catch (NumberFormatException ignored) {
+        }
+        return Color.fromARGB(0x50, 0x00, 0x00, 0x00);
+    }
+
+    private void purgeOrphanHolograms() {
+        for (World world : Bukkit.getWorlds()) {
+            for (Entity entity : world.getEntitiesByClass(TextDisplay.class)) {
+                if (entity.getScoreboardTags().contains(HOLOGRAM_TAG)) {
+                    entity.remove();
+                }
+            }
+        }
+    }
+
+    private void removeTaggedHolograms(World world, String blockKey) {
+        if (world == null) return;
+
+        String tag = tagForKey(blockKey);
+        for (Entity entity : world.getEntitiesByClass(TextDisplay.class)) {
+            Set<String> tags = entity.getScoreboardTags();
+            if (tags.contains(HOLOGRAM_TAG) && tags.contains(tag)) {
+                entity.remove();
             }
         }
     }

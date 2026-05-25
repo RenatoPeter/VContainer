@@ -15,6 +15,7 @@ import hu.vzone.vcontainer.utils.ConfigUpdater;
 import hu.vzone.vcontainer.utils.PlaceholderHook;
 import hu.vzone.vcontainer.utils.ServerVersionSupport;
 import hu.vzone.vcontainer.utils.AuditLogger;
+import hu.vzone.vcontainer.utils.UpdateChecker;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
@@ -59,6 +60,7 @@ public final class VContainer extends JavaPlugin {
     private ContainerManager containerManager;
     private StorageBlockManager storageBlockManager;
     private SellService sellService;
+    private UpdateChecker updateChecker;
     private volatile boolean restartRequired;
     private volatile String restartReason = "";
 
@@ -85,6 +87,7 @@ public final class VContainer extends JavaPlugin {
         containerManager = new ContainerManager(this);
         storageBlockManager = new StorageBlockManager(this, containerManager);
         sellService = new SellService(this);
+        updateChecker = new UpdateChecker(this);
         api = new VContainerAPIImpl(this, containerManager, storageBlockManager);
 
         Bukkit.getServicesManager().register(VContainerAPI.class, api, this, ServicePriority.Normal);
@@ -94,6 +97,7 @@ public final class VContainer extends JavaPlugin {
         getCommand("vcontainer").setExecutor(adminCommand);
         getCommand("vcontainer").setTabCompleter(adminCommand);
         Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, storageBlockManager), this);
+        updateChecker.checkAsync();
 
         getLogger().info("VContainer v" + getDescription().getVersion() + " enabled successfully.");
     }
@@ -196,6 +200,10 @@ public final class VContainer extends JavaPlugin {
 
     public SellService getSellService() {
         return sellService;
+    }
+
+    public UpdateChecker getUpdateChecker() {
+        return updateChecker;
     }
 
     public FileConfiguration getMenuConfig(String name) {

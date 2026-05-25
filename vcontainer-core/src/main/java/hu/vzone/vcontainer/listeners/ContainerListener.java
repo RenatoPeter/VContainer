@@ -176,6 +176,17 @@ public class ContainerListener implements Listener {
     @EventHandler
     public void onJoin(PlayerJoinEvent event) {
         SkinProvider.cache(event.getPlayer());
+        VContainer plugin = VContainer.getInstance();
+        if (plugin == null) return;
+        if (!plugin.getConfig().getBoolean("update-checker.enabled", true)) return;
+        if (!event.getPlayer().isOp()) return;
+        if (!plugin.getUpdateChecker().wasChecked() || !plugin.getUpdateChecker().isUpdateAvailable()) return;
+
+        Bukkit.getScheduler().runTaskLater(plugin, () -> event.getPlayer().sendMessage(VContainer.formatMessage(
+                event.getPlayer(),
+                "{prefix} New version available: &f" + plugin.getUpdateChecker().getLatestVersion()
+                        + " &7(Current: &f" + plugin.getDescription().getVersion() + "&7)"
+        )), 40L);
     }
 
     @EventHandler

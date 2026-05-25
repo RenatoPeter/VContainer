@@ -850,6 +850,10 @@ public class ContainerGUI {
                     .replace("%withdraw-one-line%", withdrawOneLine)
                     .replace("%withdraw-stack-line%", withdrawStackLine)
                     .replace("%sell-format%", String.join("\n", resolvedSellFormat));
+            if (line.contains("%sell-format%") && formatted.isEmpty()) {
+                lore.add("");
+                continue;
+            }
             if (formatted.contains("\n")) {
                 boolean preserveBlank = line.isEmpty() || line.contains("%sell-format%");
                 for (String split : formatted.split("\n", -1)) {
