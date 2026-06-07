@@ -11,6 +11,7 @@ softdepend:
   - Oraxen
   - MythicMobs
   - ItemsAdder
+  - VortexMinions
   - HeadDatabase
   - PlaceholderAPI
 

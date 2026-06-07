@@ -53,6 +53,11 @@
             <url>https://maven.devs.beer/</url>
         </repository>
 
+        <repository>
+            <id>vortex-repo</id>
+            <url>https://repo.vortexdevelopment.net/repository</url>
+        </repository>
+
     </repositories>
 
     <dependencies>
@@ -165,6 +170,13 @@
             <groupId>dev.lone</groupId>
             <artifactId>api-itemsadder</artifactId>
             <version>4.0.10</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>net.vortexdevelopment</groupId>
+            <artifactId>VortexMinions-API</artifactId>
+            <version>1.0.0-SNAPSHOT</version>
             <scope>provided</scope>
         </dependency>
 

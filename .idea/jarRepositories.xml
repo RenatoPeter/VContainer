@@ -32,6 +32,11 @@
       <option name="url" value="https://maven.devs.beer/" />
     </remote-repository>
     <remote-repository>
+      <option name="id" value="vortexdevelopment" />
+      <option name="name" value="vortexdevelopment" />
+      <option name="url" value="https://repo.vortexdevelopment.net/maven-public/" />
+    </remote-repository>
+    <remote-repository>
       <option name="id" value="mojang" />
       <option name="name" value="mojang" />
       <option name="url" value="https://libraries.minecraft.net/" />
@@ -50,6 +55,11 @@
       <option name="id" value="nexus" />
       <option name="name" value="Lumine Releases" />
       <option name="url" value="https://mvn.lumine.io/repository/maven-public/" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="vortex-repo" />
+      <option name="name" value="vortex-repo" />
+      <option name="url" value="https://repo.vortexdevelopment.net/repository" />
     </remote-repository>
   </component>
 </project>

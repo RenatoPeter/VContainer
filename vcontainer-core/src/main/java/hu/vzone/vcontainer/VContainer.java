@@ -7,6 +7,7 @@ import hu.vzone.vcontainer.api.impl.VContainerAPIImpl;
 import hu.vzone.vcontainer.commands.ContainerAdminCommand;
 import hu.vzone.vcontainer.commands.ContainerCommand;
 import hu.vzone.vcontainer.listeners.ContainerListener;
+import hu.vzone.vcontainer.listeners.VortexMinionsHookListener;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.sell.SellService;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
@@ -97,6 +98,10 @@ public final class VContainer extends JavaPlugin {
         getCommand("vcontainer").setExecutor(adminCommand);
         getCommand("vcontainer").setTabCompleter(adminCommand);
         Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, storageBlockManager), this);
+        if (Bukkit.getPluginManager().isPluginEnabled("VortexMinions")) {
+            Bukkit.getPluginManager().registerEvents(new VortexMinionsHookListener(containerManager, storageBlockManager), this);
+            getLogger().info("Hooked into VortexMinions.");
+        }
         updateChecker.checkAsync();
 
         getLogger().info("VContainer v" + getDescription().getVersion() + " enabled successfully.");
