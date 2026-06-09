@@ -11,6 +11,9 @@ softdepend:
   - Oraxen
   - MythicMobs
   - ItemsAdder
+  - PremiumVanish
+  - SuperVanish
+  - Essentials
   - VortexMinions
   - HeadDatabase
   - PlaceholderAPI

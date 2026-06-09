@@ -101,6 +101,16 @@ public final class ConfigItemBuilder {
         return item;
     }
 
+    public static Map<String, String> withItemPlaceholders(Map<String, String> placeholders, ItemStack item) {
+        java.util.Map<String, String> merged = new java.util.HashMap<>(placeholders);
+        String displayName = ItemDisplayNames.resolve(item);
+        merged.putIfAbsent("display_name", displayName);
+        merged.putIfAbsent("display-name", displayName);
+        merged.putIfAbsent("item_name", displayName);
+        merged.putIfAbsent("item-name", displayName);
+        return merged;
+    }
+
     private static void applyItemFlags(VContainer plugin, ConfigurationSection section, ItemMeta meta) {
         for (String flagName : getStringList(section, "ItemFlags", "item_flags")) {
             try {

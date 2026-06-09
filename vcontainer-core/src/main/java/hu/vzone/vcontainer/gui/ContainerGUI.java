@@ -15,12 +15,15 @@ import hu.vzone.vcontainer.utils.ItemUtils;
 import hu.vzone.vcontainer.utils.PermissionUtils;
 import hu.vzone.vcontainer.utils.SkinProvider;
 import hu.vzone.vcontainer.utils.StorageBlockItem;
+import hu.vzone.vcontainer.utils.ItemDisplayNames;
+import hu.vzone.vcontainer.utils.VanishSupport;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.Material;
 import org.bukkit.configuration.ConfigurationSection;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.OfflinePlayer;
 import org.bukkit.entity.Player;
 import org.bukkit.event.inventory.ClickType;
@@ -40,8 +43,11 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.lang.reflect.Method;
 
 public class ContainerGUI {
+    private static final long LIVE_REFRESH_DELAY_TICKS = 4L;
+    private static Method PAGINATED_CURRENT_PAGE_METHOD;
 
     private static final int ROWS = 6;
     private static final int PAGE_SIZE = 45;
@@ -77,10 +83,10 @@ public class ContainerGUI {
         if (ownerId == null || !QUEUED_REFRESHES.add(ownerId)) return;
 
         VContainer plugin = VContainer.getInstance();
-        Bukkit.getScheduler().runTask(plugin, () -> {
+        Bukkit.getScheduler().runTaskLater(plugin, () -> {
             QUEUED_REFRESHES.remove(ownerId);
             refreshOpenContainers(ownerId);
-        });
+        }, LIVE_REFRESH_DELAY_TICKS);
     }
 
     private static void openContainer(Player viewer, UUID ownerId, String ownerName, ContainerManager manager, int page) {
@@ -88,6 +94,26 @@ public class ContainerGUI {
     }
 
     private static void openContainer(Player viewer, UUID ownerId, String ownerName, ContainerManager manager, int page, StorageBlockManager storageBlockManager, String storageKey) {
+        PaginatedGui gui = Gui.paginated()
+                .title(title(VContainer.getInstance(), 1, 1))
+                .rows(menuRows(VContainer.getInstance(), "container", ROWS))
+                .pageSize(menuPageSize(VContainer.getInstance(), "container", PAGE_SIZE))
+                .create();
+        renderContainer(gui, viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
+        registerOpenView(gui, viewer, ownerId, ownerName, manager, storageBlockManager, storageKey);
+        gui.open(viewer, gui.getCurrentPageNum());
+    }
+
+    private static void renderContainer(
+            PaginatedGui gui,
+            Player viewer,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey
+    ) {
         VContainer plugin = VContainer.getInstance();
         boolean allowDeposit = plugin.getConfig().getBoolean("container-options.allow-deposit", true);
         boolean allowWithdraw = plugin.getConfig().getBoolean("container-options.allow-withdraw", true);
@@ -103,18 +129,17 @@ public class ContainerGUI {
         List<DisplayEntry> items = getDisplayEntries(containerItems, compactDisplay);
         SortMode sortMode = SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE);
         sortEntries(items, sortMode);
-        int rows = menuRows(plugin, "container", ROWS);
         int pageSize = menuPageSize(plugin, "container", PAGE_SIZE);
         int maxPage = Math.max(1, (int) Math.ceil((double) items.size() / pageSize));
         int targetPage = Math.max(1, Math.min(page, maxPage));
-
-        PaginatedGui gui = Gui.paginated()
-                .title(title(plugin, targetPage, maxPage))
-                .rows(rows)
-                .pageSize(pageSize)
-                .create();
-
-        registerOpenView(gui, viewer, ownerId, ownerName, manager, targetPage, storageBlockManager, storageKey);
+        int previousPage = gui.getCurrentPageNum();
+        gui.setPageSize(pageSize);
+        gui.clearItems();
+        gui.clearPageItems();
+        gui.setPageNum(targetPage);
+        if (viewer.getOpenInventory().getTopInventory().getHolder() != gui || previousPage != targetPage) {
+            gui.updateTitle(title(plugin, targetPage, maxPage));
+        }
 
         gui.setDefaultClickAction(event -> {
             event.setCancelled(true);
@@ -132,7 +157,7 @@ public class ContainerGUI {
                 if (deposited > 0 && depositMessages) {
                     sendItemMessage(player, "container.deposit", "{prefix} You put {amount} of {item} into the container.", deposited, getItemName(clicked), ownerName);
                 }
-                Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+                Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
                 return;
             }
 
@@ -146,7 +171,7 @@ public class ContainerGUI {
             int added = manager.addItemToContainer(ownerId, toDeposit);
             if (added <= 0) {
                 send(player, "container.deposit-blocked", "{prefix} This item cannot be stored here.");
-                Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+                Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
                 return;
             }
             AuditLogger.log("container-deposit", player, ownerId.toString(), "amount=" + added + " item=" + getItemName(toDeposit));
@@ -161,85 +186,76 @@ public class ContainerGUI {
                 event.getClickedInventory().setItem(event.getSlot(), clicked);
             }
 
-            Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
         });
 
         applyStaticItems(gui, plugin, "container");
 
         addStorageOwnerButtons(gui, plugin, viewer, ownerId, ownerName, manager, storageBlockManager, storageKey);
 
-        gui.setItem(itemSlot(plugin, "container", "sort", SORT_SLOT), ItemBuilder.from(createSortButton(plugin, sortMode)).asGuiItem(event -> {
-            event.setCancelled(true);
-            if (event.getWhoClicked() instanceof Player player) {
-                SORT_MODES.put(player.getUniqueId(), sortMode.next());
-                openContainer(player, ownerId, ownerName, manager, targetPage, storageBlockManager, storageKey);
-            }
-        }));
-
-        if (targetPage > 1) {
-            gui.setItem(itemSlot(plugin, "container", "page-prev", PREVIOUS_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "page-prev")).asGuiItem(event -> {
+        ItemStack sortButton = createSortButton(plugin, sortMode);
+        if (sortButton != null) {
+            gui.setItem(itemSlot(plugin, "container", "sort", SORT_SLOT), ItemBuilder.from(sortButton).asGuiItem(event -> {
                 event.setCancelled(true);
                 if (event.getWhoClicked() instanceof Player player) {
-                    openContainer(player, ownerId, ownerName, manager, targetPage - 1, storageBlockManager, storageKey);
+                    SORT_MODES.put(player.getUniqueId(), sortMode.next());
+                    refreshViewerContainer(player, ownerId, ownerName, manager, targetPage, storageBlockManager, storageKey);
                 }
             }));
+        }
+
+        if (targetPage > 1) {
+            ItemStack previousButton = createConfiguredButton(plugin, "container", "page-prev");
+            if (previousButton != null) {
+                gui.setItem(itemSlot(plugin, "container", "page-prev", PREVIOUS_SLOT), ItemBuilder.from(previousButton).asGuiItem(event -> {
+                    event.setCancelled(true);
+                    if (event.getWhoClicked() instanceof Player player) {
+                        refreshViewerContainer(player, ownerId, ownerName, manager, targetPage - 1, storageBlockManager, storageKey);
+                    }
+                }));
+            }
         }
 
         if (targetPage < maxPage) {
-            gui.setItem(itemSlot(plugin, "container", "page-next", NEXT_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "page-next")).asGuiItem(event -> {
-                event.setCancelled(true);
-                if (event.getWhoClicked() instanceof Player player) {
-                    openContainer(player, ownerId, ownerName, manager, targetPage + 1, storageBlockManager, storageKey);
-                }
-            }));
+            ItemStack nextButton = createConfiguredButton(plugin, "container", "page-next");
+            if (nextButton != null) {
+                gui.setItem(itemSlot(plugin, "container", "page-next", NEXT_SLOT), ItemBuilder.from(nextButton).asGuiItem(event -> {
+                    event.setCancelled(true);
+                    if (event.getWhoClicked() instanceof Player player) {
+                        refreshViewerContainer(player, ownerId, ownerName, manager, targetPage + 1, storageBlockManager, storageKey);
+                    }
+                }));
+            }
         }
 
         for (DisplayEntry entry : items) {
-            ItemStack snapshot = createDisplayItem(plugin, viewer, entry, compactDisplay, allowWithdraw, sellEnabled);
-            ItemStack target = entry.item().clone();
-            target.setAmount(1);
-
-            gui.addItem(ItemBuilder.from(snapshot).asGuiItem(event -> {
-                event.setCancelled(true);
-                if (!(event.getWhoClicked() instanceof Player player)) return;
-
-                if (sellEnabled && isConfiguredSellClick(plugin, event.getClick())) {
-                    handleSellClick(player, manager, ownerId, ownerName, entry, compactDisplay, event.getClick(), gui.getCurrentPageNum(), storageBlockManager, storageKey, sellMessages);
-                    return;
-                }
-
-                if (!allowWithdraw) return;
-
-                int requested = getWithdrawAmount(plugin, event.getClick(), entry, compactDisplay);
-                if (requested <= 0) {
-                    return;
-                }
-                int fit = getFitAmount(player.getInventory(), target, requested);
-                if (fit <= 0) {
-                    send(player, "container.inventory-full", "{prefix} Your inventory is full.");
-                    return;
-                }
-
-                int taken = manager.takeItemFromContainer(ownerId, target, Math.min(requested, fit));
-                if (taken <= 0) {
-                    Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
-                    return;
-                }
-
-                ItemStack toGive = target.clone();
-                toGive.setAmount(taken);
-                player.getInventory().addItem(toGive);
-                AuditLogger.log("container-withdraw", player, ownerId.toString(), "amount=" + taken + " item=" + getItemName(toGive));
-
-                if (withdrawMessages) {
-                    sendItemMessage(player, "container.take", "{prefix} You took {amount} of {item} out of the container.", taken, getItemName(toGive), ownerName);
-                }
-
-                Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
-            }));
+            gui.addItem(createPageGuiItem(
+                    plugin, gui, viewer, ownerId, ownerName, manager, storageBlockManager, storageKey,
+                    entry, compactDisplay, allowWithdraw, sellEnabled, sellMessages
+            ));
         }
+        if (viewer.getOpenInventory().getTopInventory().getHolder() == gui) {
+            gui.update();
+        }
+    }
 
-        gui.open(viewer, targetPage);
+    private static void refreshViewerContainer(
+            Player viewer,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey
+    ) {
+        OpenContainerView current = OPEN_VIEWS.get(viewer.getUniqueId());
+        if (current != null
+                && current.ownerId().equals(ownerId)
+                && viewer.getOpenInventory().getTopInventory().getHolder() == current.gui()) {
+            renderContainer(current.gui(), viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
+            return;
+        }
+        openContainer(viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
     }
 
     private static void registerOpenView(
@@ -248,7 +264,6 @@ public class ContainerGUI {
             UUID ownerId,
             String ownerName,
             ContainerManager manager,
-            int page,
             StorageBlockManager storageBlockManager,
             String storageKey
     ) {
@@ -259,9 +274,9 @@ public class ContainerGUI {
                 ownerId,
                 ownerName,
                 manager,
-                page,
                 storageBlockManager,
-                storageKey
+                storageKey,
+                gui
         ));
 
         gui.setCloseGuiAction(event -> Bukkit.getScheduler().runTask(VContainer.getInstance(), () -> {
@@ -281,17 +296,176 @@ public class ContainerGUI {
                 OPEN_VIEWS.remove(view.viewerId());
                 continue;
             }
+            if (shouldDeferLiveRefresh(viewer, view.gui())) {
+                queueRefresh(ownerId);
+                continue;
+            }
 
-            openContainer(
+            if (!applyLiveRefresh(
+                    view.gui(),
                     viewer,
                     view.ownerId(),
                     view.ownerName(),
                     view.manager(),
-                    view.page(),
+                    Math.max(1, view.gui().getCurrentPageNum()),
                     view.storageBlockManager(),
                     view.storageKey()
-            );
+            )) {
+                renderContainer(
+                        view.gui(),
+                        viewer,
+                        view.ownerId(),
+                        view.ownerName(),
+                        view.manager(),
+                        Math.max(1, view.gui().getCurrentPageNum()),
+                        view.storageBlockManager(),
+                        view.storageKey()
+                );
+            }
         }
+    }
+
+    private static boolean shouldDeferLiveRefresh(Player viewer, PaginatedGui gui) {
+        if (viewer.getOpenInventory().getTopInventory().getHolder() != gui) {
+            return true;
+        }
+
+        ItemStack cursor = viewer.getOpenInventory().getCursor();
+        return cursor != null && !cursor.getType().isAir();
+    }
+
+    private static boolean applyLiveRefresh(
+            PaginatedGui gui,
+            Player viewer,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey
+    ) {
+        try {
+            VContainer plugin = VContainer.getInstance();
+            boolean allowWithdraw = plugin.getConfig().getBoolean("container-options.allow-withdraw", true);
+            boolean sellMessages = plugin.getConfig().getBoolean("container-options.messages.sell", true);
+            boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+            boolean sellEnabled = plugin.getSellService() != null && plugin.getSellService().isSellEnabled();
+
+            List<ItemStack> containerItems = manager.getAllItemFromContainer(ownerId);
+            List<DisplayEntry> items = getDisplayEntries(containerItems, compactDisplay);
+            SortMode sortMode = SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE);
+            sortEntries(items, sortMode);
+
+            int pageSize = menuPageSize(plugin, "container", PAGE_SIZE);
+            int maxPage = Math.max(1, (int) Math.ceil((double) items.size() / pageSize));
+            int targetPage = Math.max(1, Math.min(page, maxPage));
+            if (targetPage != page) {
+                return false;
+            }
+
+            List<Integer> pageSlots = pageSlots(gui);
+            int fromIndex = (targetPage - 1) * pageSize;
+            int toIndex = Math.min(items.size(), fromIndex + Math.min(pageSize, pageSlots.size()));
+            Map<Integer, GuiItem> currentPage = mutableCurrentPage(gui);
+
+            int index = fromIndex;
+            for (int slot : pageSlots) {
+                if (index < toIndex) {
+                    DisplayEntry entry = items.get(index++);
+                    GuiItem updatedItem = createPageGuiItem(
+                            plugin, gui, viewer, ownerId, ownerName, manager, storageBlockManager, storageKey,
+                            entry, compactDisplay, allowWithdraw, sellEnabled, sellMessages
+                    );
+                    currentPage.put(slot, updatedItem);
+                    gui.getInventory().setItem(slot, updatedItem.getItemStack());
+                } else {
+                    currentPage.remove(slot);
+                    gui.getInventory().setItem(slot, null);
+                }
+            }
+            return true;
+        } catch (ReflectiveOperationException ex) {
+            return false;
+        }
+    }
+
+    private static List<Integer> pageSlots(PaginatedGui gui) {
+        List<Integer> slots = new ArrayList<>();
+        for (int slot = 0; slot < gui.getInventory().getSize(); slot++) {
+            if (gui.getGuiItem(slot) == null) {
+                slots.add(slot);
+            }
+        }
+        return slots;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<Integer, GuiItem> mutableCurrentPage(PaginatedGui gui) throws ReflectiveOperationException {
+        if (PAGINATED_CURRENT_PAGE_METHOD == null) {
+            PAGINATED_CURRENT_PAGE_METHOD = PaginatedGui.class.getDeclaredMethod("getMutableCurrentPageItems");
+            PAGINATED_CURRENT_PAGE_METHOD.setAccessible(true);
+        }
+        return (Map<Integer, GuiItem>) PAGINATED_CURRENT_PAGE_METHOD.invoke(gui);
+    }
+
+    private static GuiItem createPageGuiItem(
+            VContainer plugin,
+            PaginatedGui gui,
+            Player viewer,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            StorageBlockManager storageBlockManager,
+            String storageKey,
+            DisplayEntry entry,
+            boolean compactDisplay,
+            boolean allowWithdraw,
+            boolean sellEnabled,
+            boolean sellMessages
+    ) {
+        ItemStack snapshot = createDisplayItem(plugin, viewer, entry, compactDisplay, allowWithdraw, sellEnabled);
+        ItemStack target = entry.item().clone();
+        target.setAmount(1);
+
+        return ItemBuilder.from(snapshot).asGuiItem(event -> {
+            event.setCancelled(true);
+            if (!(event.getWhoClicked() instanceof Player player)) return;
+
+            if (sellEnabled && isConfiguredSellClick(plugin, event.getClick())) {
+                handleSellClick(player, manager, ownerId, ownerName, entry, compactDisplay, event.getClick(), gui.getCurrentPageNum(), storageBlockManager, storageKey, sellMessages);
+                return;
+            }
+
+            if (!allowWithdraw) return;
+
+            int requested = getWithdrawAmount(plugin, event.getClick(), entry, compactDisplay);
+            if (requested <= 0) {
+                return;
+            }
+            int fit = getFitAmount(player.getInventory(), target, requested);
+            if (fit <= 0) {
+                send(player, "container.inventory-full", "{prefix} Your inventory is full.");
+                return;
+            }
+
+            int taken = manager.takeItemFromContainer(ownerId, target, Math.min(requested, fit));
+            if (taken <= 0) {
+                Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+                return;
+            }
+
+            ItemStack toGive = target.clone();
+            toGive.setAmount(taken);
+            player.getInventory().addItem(toGive);
+            AuditLogger.log("container-withdraw", player, ownerId.toString(), "amount=" + taken + " item=" + getItemName(toGive));
+
+            boolean withdrawMessages = plugin.getConfig().getBoolean("container-options.messages.withdraw", true);
+            if (withdrawMessages) {
+                sendItemMessage(player, "container.take", "{prefix} You took {amount} of {item} out of the container.", taken, getItemName(toGive), ownerName);
+            }
+
+            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+        });
     }
 
     private static int getWithdrawAmount(VContainer plugin, ClickType click, DisplayEntry entry, boolean compactDisplay) {
@@ -440,28 +614,34 @@ public class ContainerGUI {
         StorageBlock storageBlock = storageBlockManager.get(storageKey);
         if (!storageBlockManager.canManage(viewer, storageBlock)) return;
 
-        gui.setItem(itemSlot(plugin, "container", "storage-pickup", PICKUP_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "storage-pickup", viewer)).asGuiItem(event -> {
-            event.setCancelled(true);
-            if (!(event.getWhoClicked() instanceof Player player)) return;
-            if (!storageBlockManager.canManage(player, storageBlockManager.get(storageKey))) return;
+        ItemStack pickupButton = createConfiguredButton(plugin, "container", "storage-pickup", viewer);
+        if (pickupButton != null) {
+            gui.setItem(itemSlot(plugin, "container", "storage-pickup", PICKUP_SLOT), ItemBuilder.from(pickupButton).asGuiItem(event -> {
+                event.setCancelled(true);
+                if (!(event.getWhoClicked() instanceof Player player)) return;
+                if (!storageBlockManager.canManage(player, storageBlockManager.get(storageKey))) return;
 
-            ConfirmGUI.open(player, "block-pickup", "&0Confirm block pickup", () -> {
-                storageBlockManager.removePersonal(storageKey, false);
-                AuditLogger.log("personal-block-pickup", player, storageKey, "owner=" + ownerName);
-                for (ItemStack leftover : player.getInventory().addItem(StorageBlockItem.build(plugin, 1)).values()) {
-                    player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+                ConfirmGUI.open(player, "block-pickup", "&0Confirm block pickup", () -> {
+                    storageBlockManager.removePersonal(storageKey, false);
+                    AuditLogger.log("personal-block-pickup", player, storageKey, "owner=" + ownerName);
+                    for (ItemStack leftover : player.getInventory().addItem(StorageBlockItem.build(plugin, 1)).values()) {
+                        player.getWorld().dropItemNaturally(player.getLocation(), leftover);
+                    }
+                    player.closeInventory();
+                    player.sendMessage(VContainer.formatMessage(player, plugin.getMessageConfig().getString("storage-block.picked-up", "{prefix} Personal storage block picked up.")));
+                });
+            }));
+        }
+
+        ItemStack membersButton = createConfiguredButton(plugin, "container", "storage-members", viewer);
+        if (membersButton != null) {
+            gui.setItem(itemSlot(plugin, "container", "storage-members", MEMBERS_SLOT), ItemBuilder.from(membersButton).asGuiItem(event -> {
+                event.setCancelled(true);
+                if (event.getWhoClicked() instanceof Player player) {
+                    openMembersMenu(player, ownerId, ownerName, manager, storageBlockManager, storageKey);
                 }
-                player.closeInventory();
-                player.sendMessage(VContainer.formatMessage(player, plugin.getMessageConfig().getString("storage-block.picked-up", "{prefix} Personal storage block picked up.")));
-            });
-        }));
-
-        gui.setItem(itemSlot(plugin, "container", "storage-members", MEMBERS_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "container", "storage-members", viewer)).asGuiItem(event -> {
-            event.setCancelled(true);
-            if (event.getWhoClicked() instanceof Player player) {
-                openMembersMenu(player, ownerId, ownerName, manager, storageBlockManager, storageKey);
-            }
-        }));
+            }));
+        }
     }
 
     private static void openMembersMenu(Player owner, UUID ownerId, String ownerName, ContainerManager manager, StorageBlockManager storageBlockManager, String storageKey) {
@@ -479,6 +659,7 @@ public class ContainerGUI {
 
         for (Player target : Bukkit.getOnlinePlayers()) {
             if (target.getUniqueId().equals(ownerId)) continue;
+            if (!VanishSupport.canSee(owner, target)) continue;
             gui.addItem(ItemBuilder.from(createMemberButton(plugin, target, storageBlock.members().contains(target.getUniqueId()))).asGuiItem(event -> {
                 event.setCancelled(true);
                 storageBlockManager.toggleMember(storageKey, target);
@@ -486,12 +667,15 @@ public class ContainerGUI {
             }));
         }
 
-        gui.setItem(itemSlot(plugin, "members", "back", SORT_SLOT), ItemBuilder.from(createConfiguredButton(plugin, "members", "back")).asGuiItem(event -> {
-            event.setCancelled(true);
-            if (event.getWhoClicked() instanceof Player player) {
-                openContainer(player, ownerId, ownerName, manager, 1, storageBlockManager, storageKey);
-            }
-        }));
+        ItemStack backButton = createConfiguredButton(plugin, "members", "back");
+        if (backButton != null) {
+            gui.setItem(itemSlot(plugin, "members", "back", SORT_SLOT), ItemBuilder.from(backButton).asGuiItem(event -> {
+                event.setCancelled(true);
+                if (event.getWhoClicked() instanceof Player player) {
+                    openContainer(player, ownerId, ownerName, manager, 1, storageBlockManager, storageKey);
+                }
+            }));
+        }
         gui.open(owner);
     }
 
@@ -525,17 +709,15 @@ public class ContainerGUI {
 
     private static ItemStack createSortButton(VContainer plugin, SortMode sortMode) {
         ConfigurationSection section = itemSection(plugin, "container", "sort", "sort");
+        if (section == null) return null;
+
         String name = "&bSorting: &f{mode}";
         List<String> loreRaw = List.of("&7Click to switch sorting mode", "&7Next: &f{next-mode}");
 
-        if (section != null) {
-            name = section.getString("Name", section.getString("display_name", section.getString("name", name)));
-            loreRaw = getStringList(section, "Lore", "lore", loreRaw);
-        }
+        name = section.getString("Name", section.getString("display_name", section.getString("name", name)));
+        loreRaw = getStringList(section, "Lore", "lore", loreRaw);
 
-        ItemStack item = section == null
-                ? new ItemStack(Material.HOPPER)
-                : ConfigItemBuilder.build(plugin, section, Material.HOPPER, Map.of(
+        ItemStack item = ConfigItemBuilder.build(plugin, section, Material.HOPPER, Map.of(
                 "mode", sortMode.displayName(),
                 "next-mode", sortMode.next().displayName()
         ));
@@ -560,20 +742,18 @@ public class ContainerGUI {
 
     private static ItemStack createConfiguredButton(VContainer plugin, String menuName, String action, Player player) {
         ConfigurationSection section = itemSection(plugin, menuName, action, legacyButtonPath(action));
+        if (section == null) return null;
+
         String name = "&cButton";
         List<String> loreRaw = List.of();
 
-        if (section != null) {
-            name = section.getString("Name", section.getString("display_name", section.getString("name", name)));
-            loreRaw = getStringList(section, "Lore", "lore", loreRaw);
-        }
+        name = section.getString("Name", section.getString("display_name", section.getString("name", name)));
+        loreRaw = getStringList(section, "Lore", "lore", loreRaw);
 
         Map<String, String> placeholders = player == null
                 ? Map.of()
                 : Map.of("player", player.getName(), "owner", player.getName(), "uuid", player.getUniqueId().toString());
-        ItemStack item = section == null
-                ? new ItemStack(Material.BARRIER)
-                : ConfigItemBuilder.build(plugin, section, Material.BARRIER, placeholders);
+        ItemStack item = ConfigItemBuilder.build(plugin, section, Material.BARRIER, placeholders);
         ItemMeta meta = item.getItemMeta();
         if (meta != null) {
             applyHeadOwner(meta, section, player);
@@ -618,13 +798,7 @@ public class ContainerGUI {
 
     private static void applyStaticItems(PaginatedGui gui, VContainer plugin, String menuName) {
         ConfigurationSection items = menu(plugin, menuName).getConfigurationSection("items");
-        if (items == null) {
-            GuiItem filler = ItemBuilder.from(createFiller()).asGuiItem(event -> event.setCancelled(true));
-            for (int slot = 45; slot < 54; slot++) {
-                gui.setItem(slot, filler);
-            }
-            return;
-        }
+        if (items == null) return;
 
         for (String key : items.getKeys(false)) {
             ConfigurationSection section = items.getConfigurationSection(key);
@@ -642,7 +816,8 @@ public class ContainerGUI {
     }
 
     private static ConfigurationSection itemSection(VContainer plugin, String menuName, String action, String legacyPath) {
-        ConfigurationSection items = menu(plugin, menuName).getConfigurationSection("items");
+        FileConfiguration menu = menu(plugin, menuName);
+        ConfigurationSection items = menu.getConfigurationSection("items");
         if (items != null) {
             for (String key : items.getKeys(false)) {
                 ConfigurationSection section = items.getConfigurationSection(key);
@@ -651,7 +826,10 @@ public class ContainerGUI {
                 }
             }
         }
-        return menu(plugin, menuName).getConfigurationSection("buttons." + legacyPath);
+        if (menu.getInt("gui-version", 0) >= 2 || items != null) {
+            return null;
+        }
+        return menu.getConfigurationSection("buttons." + legacyPath);
     }
 
     private static int itemSlot(VContainer plugin, String menuName, String action, int fallback) {
@@ -935,6 +1113,8 @@ public class ContainerGUI {
         player.sendMessage(VContainer.formatMessage(player, message
                 .replace("{amount}", String.valueOf(amount))
                 .replace("{item}", itemName)
+                .replace("{display_name}", itemName)
+                .replace("{display-name}", itemName)
                 .replace("{player}", ownerName)));
     }
 
@@ -946,6 +1126,8 @@ public class ContainerGUI {
         player.sendMessage(VContainer.formatMessage(player, message
                 .replace("{amount}", String.valueOf(amount))
                 .replace("{item}", itemName)
+                .replace("{display_name}", itemName)
+                .replace("{display-name}", itemName)
                 .replace("{player}", ownerName)
                 .replace("{price}", price)));
     }
@@ -982,13 +1164,13 @@ public class ContainerGUI {
         VContainer plugin = VContainer.getInstance();
         SellService sellService = plugin.getSellService();
         if (sellService == null || !sellService.isSellEnabled()) {
-            Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
             return;
         }
 
         int requested = getSellAmount(plugin, click, entry, compactDisplay);
         if (requested <= 0) {
-            Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
             return;
         }
         SellService.SellResult result = sellService.sell(player, manager, ownerId, entry.item(), requested);
@@ -1000,7 +1182,7 @@ public class ContainerGUI {
                     ? "{prefix} This item cannot be sold."
                     : "{prefix} The sell system is not available right now.";
             send(player, path, fallback);
-            Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
             return;
         }
 
@@ -1011,7 +1193,7 @@ public class ContainerGUI {
             sendSellMessage(player, result.amount(), getItemName(soldItem), ownerName, result.formattedPrice());
         }
 
-        Bukkit.getScheduler().runTask(plugin, () -> openContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+        Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
     }
 
     private static SellPreview createSellPreview(VContainer plugin, Player viewer, DisplayEntry entry, boolean sellEnabled) {
@@ -1075,28 +1257,7 @@ public class ContainerGUI {
     }
 
     private static String getItemName(ItemStack item) {
-        return item.hasItemMeta() && item.getItemMeta().hasDisplayName()
-                ? item.getItemMeta().getDisplayName()
-                : formatMaterialName(item.getType());
-    }
-
-    private static String formatMaterialName(Material material) {
-        return switch (material) {
-            case REDSTONE -> "Redstone Dust";
-            default -> {
-                String[] parts = material.name().toLowerCase().split("_");
-                StringBuilder builder = new StringBuilder();
-                for (int i = 0; i < parts.length; i++) {
-                    if (parts[i].isEmpty()) continue;
-                    if (builder.length() > 0) builder.append(' ');
-                    builder.append(Character.toUpperCase(parts[i].charAt(0)));
-                    if (parts[i].length() > 1) {
-                        builder.append(parts[i].substring(1));
-                    }
-                }
-                yield builder.toString();
-            }
-        };
+        return ItemDisplayNames.resolve(item);
     }
 
     private enum SortMode {
@@ -1133,9 +1294,9 @@ public class ContainerGUI {
             UUID ownerId,
             String ownerName,
             ContainerManager manager,
-            int page,
             StorageBlockManager storageBlockManager,
-            String storageKey
+            String storageKey,
+            PaginatedGui gui
     ) {
     }
 
