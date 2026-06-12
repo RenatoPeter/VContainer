@@ -33,6 +33,7 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.bukkit.inventory.meta.ItemMeta;
 import org.bukkit.inventory.meta.SkullMeta;
+import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -46,7 +47,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.lang.reflect.Method;
 
 public class ContainerGUI {
-    private static final long LIVE_REFRESH_DELAY_TICKS = 4L;
     private static Method PAGINATED_CURRENT_PAGE_METHOD;
 
     private static final int ROWS = 6;
@@ -59,8 +59,14 @@ public class ContainerGUI {
     private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacySection();
     private static final Map<UUID, SortMode> SORT_MODES = new ConcurrentHashMap<>();
     private static final Map<UUID, OpenContainerView> OPEN_VIEWS = new ConcurrentHashMap<>();
+    private static final Map<UUID, ViewRenderState> VIEW_RENDER_STATES = new ConcurrentHashMap<>();
+    private static final Map<UUID, Integer> OWNER_VIEW_COUNTS = new ConcurrentHashMap<>();
+    private static final Map<UUID, CachedDisplayEntries> DISPLAY_CACHE = new ConcurrentHashMap<>();
     private static final AtomicLong VIEW_IDS = new AtomicLong();
     private static final java.util.Set<UUID> QUEUED_REFRESHES = ConcurrentHashMap.newKeySet();
+    private static final int REFRESH_INTERVAL_TICKS = 4;
+    private static final int REFRESH_BATCH_OWNERS = 32;
+    private static volatile BukkitTask refreshTask;
 
     public static void openContainer(Player player, ContainerManager manager, int page) {
         openContainer(player, player.getUniqueId(), player.getName(), manager, page);
@@ -76,17 +82,18 @@ public class ContainerGUI {
 
     public static void clearSortPreference(UUID playerId) {
         SORT_MODES.remove(playerId);
-        OPEN_VIEWS.remove(playerId);
+        OpenContainerView removed = OPEN_VIEWS.remove(playerId);
+        if (removed != null) {
+            decrementOwnerViewCount(removed.ownerId());
+        }
+        VIEW_RENDER_STATES.remove(playerId);
     }
 
     public static void queueRefresh(UUID ownerId) {
-        if (ownerId == null || !QUEUED_REFRESHES.add(ownerId)) return;
-
-        VContainer plugin = VContainer.getInstance();
-        Bukkit.getScheduler().runTaskLater(plugin, () -> {
-            QUEUED_REFRESHES.remove(ownerId);
-            refreshOpenContainers(ownerId);
-        }, LIVE_REFRESH_DELAY_TICKS);
+        if (ownerId == null) return;
+        if (OWNER_VIEW_COUNTS.getOrDefault(ownerId, 0) <= 0) return;
+        QUEUED_REFRESHES.add(ownerId);
+        ensureRefreshTask();
     }
 
     private static void openContainer(Player viewer, UUID ownerId, String ownerName, ContainerManager manager, int page) {
@@ -125,8 +132,7 @@ public class ContainerGUI {
         SellService sellService = plugin.getSellService();
         boolean sellEnabled = sellService != null && sellService.isSellEnabled();
 
-        List<ItemStack> containerItems = manager.getAllItemFromContainer(ownerId);
-        List<DisplayEntry> items = getDisplayEntries(containerItems, compactDisplay);
+        List<DisplayEntry> items = getDisplayEntries(manager, ownerId, compactDisplay);
         SortMode sortMode = SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE);
         sortEntries(items, sortMode);
         int pageSize = menuPageSize(plugin, "container", PAGE_SIZE);
@@ -137,6 +143,7 @@ public class ContainerGUI {
         gui.clearItems();
         gui.clearPageItems();
         gui.setPageNum(targetPage);
+        VIEW_RENDER_STATES.put(viewer.getUniqueId(), new ViewRenderState(targetPage, maxPage));
         if (viewer.getOpenInventory().getTopInventory().getHolder() != gui || previousPage != targetPage) {
             gui.updateTitle(title(plugin, targetPage, maxPage));
         }
@@ -157,7 +164,7 @@ public class ContainerGUI {
                 if (deposited > 0 && depositMessages) {
                     sendItemMessage(player, "container.deposit", "{prefix} You put {amount} of {item} into the container.", deposited, getItemName(clicked), ownerName);
                 }
-                Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+                queueRefresh(ownerId);
                 return;
             }
 
@@ -171,7 +178,7 @@ public class ContainerGUI {
             int added = manager.addItemToContainer(ownerId, toDeposit);
             if (added <= 0) {
                 send(player, "container.deposit-blocked", "{prefix} This item cannot be stored here.");
-                Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+                queueRefresh(ownerId);
                 return;
             }
             AuditLogger.log("container-deposit", player, ownerId.toString(), "amount=" + added + " item=" + getItemName(toDeposit));
@@ -186,7 +193,7 @@ public class ContainerGUI {
                 event.getClickedInventory().setItem(event.getSlot(), clicked);
             }
 
-            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+            queueRefresh(ownerId);
         });
 
         applyStaticItems(gui, plugin, "container");
@@ -252,6 +259,11 @@ public class ContainerGUI {
         if (current != null
                 && current.ownerId().equals(ownerId)
                 && viewer.getOpenInventory().getTopInventory().getHolder() == current.gui()) {
+            if (page == current.gui().getCurrentPageNum()
+                    && !shouldDeferLiveRefresh(viewer, current.gui())
+                    && applyLiveRefresh(current.gui(), viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey)) {
+                return;
+            }
             renderContainer(current.gui(), viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
             return;
         }
@@ -268,7 +280,7 @@ public class ContainerGUI {
             String storageKey
     ) {
         long viewId = VIEW_IDS.incrementAndGet();
-        OPEN_VIEWS.put(viewer.getUniqueId(), new OpenContainerView(
+        OpenContainerView previous = OPEN_VIEWS.put(viewer.getUniqueId(), new OpenContainerView(
                 viewId,
                 viewer.getUniqueId(),
                 ownerId,
@@ -278,28 +290,61 @@ public class ContainerGUI {
                 storageKey,
                 gui
         ));
+        if (previous != null) {
+            decrementOwnerViewCount(previous.ownerId());
+        }
+        OWNER_VIEW_COUNTS.merge(ownerId, 1, Integer::sum);
 
         gui.setCloseGuiAction(event -> Bukkit.getScheduler().runTask(VContainer.getInstance(), () -> {
             OpenContainerView current = OPEN_VIEWS.get(viewer.getUniqueId());
             if (current != null && current.viewId() == viewId) {
                 OPEN_VIEWS.remove(viewer.getUniqueId());
+                VIEW_RENDER_STATES.remove(viewer.getUniqueId());
+                decrementOwnerViewCount(current.ownerId());
             }
         }));
     }
 
     private static void refreshOpenContainers(UUID ownerId) {
+        VContainer plugin = VContainer.getInstance();
+        if (plugin == null) return;
+
+        List<OpenContainerView> matchingViews = new ArrayList<>();
         for (OpenContainerView view : new ArrayList<>(OPEN_VIEWS.values())) {
             if (!view.ownerId().equals(ownerId)) continue;
 
             Player viewer = Bukkit.getPlayer(view.viewerId());
             if (viewer == null || !viewer.isOnline()) {
                 OPEN_VIEWS.remove(view.viewerId());
+                VIEW_RENDER_STATES.remove(view.viewerId());
+                decrementOwnerViewCount(view.ownerId());
+                continue;
+            }
+            matchingViews.add(view);
+        }
+        if (matchingViews.isEmpty()) {
+            return;
+        }
+
+        boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+        List<DisplayEntry> baseEntries = getDisplayEntries(matchingViews.get(0).manager(), ownerId, compactDisplay);
+        boolean retryLater = false;
+
+        for (OpenContainerView view : matchingViews) {
+            Player viewer = Bukkit.getPlayer(view.viewerId());
+            if (viewer == null || !viewer.isOnline()) {
+                OPEN_VIEWS.remove(view.viewerId());
+                VIEW_RENDER_STATES.remove(view.viewerId());
+                decrementOwnerViewCount(view.ownerId());
                 continue;
             }
             if (shouldDeferLiveRefresh(viewer, view.gui())) {
-                queueRefresh(ownerId);
+                retryLater = true;
                 continue;
             }
+
+            List<DisplayEntry> sortedEntries = new ArrayList<>(baseEntries);
+            sortEntries(sortedEntries, SORT_MODES.getOrDefault(view.viewerId(), SortMode.NONE));
 
             if (!applyLiveRefresh(
                     view.gui(),
@@ -309,7 +354,8 @@ public class ContainerGUI {
                     view.manager(),
                     Math.max(1, view.gui().getCurrentPageNum()),
                     view.storageBlockManager(),
-                    view.storageKey()
+                    view.storageKey(),
+                    sortedEntries
             )) {
                 renderContainer(
                         view.gui(),
@@ -322,6 +368,10 @@ public class ContainerGUI {
                         view.storageKey()
                 );
             }
+        }
+
+        if (retryLater) {
+            QUEUED_REFRESHES.add(ownerId);
         }
     }
 
@@ -344,22 +394,41 @@ public class ContainerGUI {
             StorageBlockManager storageBlockManager,
             String storageKey
     ) {
+        VContainer plugin = VContainer.getInstance();
+        if (plugin == null) return false;
+        boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+        List<DisplayEntry> items = getDisplayEntries(manager, ownerId, compactDisplay);
+        sortEntries(items, SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE));
+        return applyLiveRefresh(gui, viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey, items);
+    }
+
+    private static boolean applyLiveRefresh(
+            PaginatedGui gui,
+            Player viewer,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey,
+            List<DisplayEntry> items
+    ) {
         try {
             VContainer plugin = VContainer.getInstance();
+            if (plugin == null) return false;
             boolean allowWithdraw = plugin.getConfig().getBoolean("container-options.allow-withdraw", true);
             boolean sellMessages = plugin.getConfig().getBoolean("container-options.messages.sell", true);
             boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
             boolean sellEnabled = plugin.getSellService() != null && plugin.getSellService().isSellEnabled();
 
-            List<ItemStack> containerItems = manager.getAllItemFromContainer(ownerId);
-            List<DisplayEntry> items = getDisplayEntries(containerItems, compactDisplay);
-            SortMode sortMode = SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE);
-            sortEntries(items, sortMode);
-
             int pageSize = menuPageSize(plugin, "container", PAGE_SIZE);
             int maxPage = Math.max(1, (int) Math.ceil((double) items.size() / pageSize));
             int targetPage = Math.max(1, Math.min(page, maxPage));
             if (targetPage != page) {
+                return false;
+            }
+            ViewRenderState state = VIEW_RENDER_STATES.get(viewer.getUniqueId());
+            if (state == null || state.page() != targetPage || state.maxPage() != maxPage) {
                 return false;
             }
 
@@ -376,11 +445,18 @@ public class ContainerGUI {
                             plugin, gui, viewer, ownerId, ownerName, manager, storageBlockManager, storageKey,
                             entry, compactDisplay, allowWithdraw, sellEnabled, sellMessages
                     );
-                    currentPage.put(slot, updatedItem);
-                    gui.getInventory().setItem(slot, updatedItem.getItemStack());
+                    ItemStack currentItem = gui.getInventory().getItem(slot);
+                    if (!sameDisplayItem(currentItem, updatedItem.getItemStack())) {
+                        currentPage.put(slot, updatedItem);
+                        gui.getInventory().setItem(slot, updatedItem.getItemStack());
+                    } else {
+                        currentPage.put(slot, updatedItem);
+                    }
                 } else {
+                    if (gui.getInventory().getItem(slot) != null) {
+                        gui.getInventory().setItem(slot, null);
+                    }
                     currentPage.remove(slot);
-                    gui.getInventory().setItem(slot, null);
                 }
             }
             return true;
@@ -450,7 +526,7 @@ public class ContainerGUI {
 
             int taken = manager.takeItemFromContainer(ownerId, target, Math.min(requested, fit));
             if (taken <= 0) {
-                Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+                queueRefresh(ownerId);
                 return;
             }
 
@@ -464,7 +540,7 @@ public class ContainerGUI {
                 sendItemMessage(player, "container.take", "{prefix} You took {amount} of {item} out of the container.", taken, getItemName(toGive), ownerName);
             }
 
-            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, gui.getCurrentPageNum(), storageBlockManager, storageKey));
+            queueRefresh(ownerId);
         });
     }
 
@@ -550,20 +626,37 @@ public class ContainerGUI {
         return deposited;
     }
 
-    private static List<DisplayEntry> getDisplayEntries(List<ItemStack> source, boolean compactDisplay) {
+    private static List<DisplayEntry> getDisplayEntries(ContainerManager manager, UUID ownerId, boolean compactDisplay) {
+        long version = manager.getContainerVersion(ownerId);
+        CachedDisplayEntries cached = DISPLAY_CACHE.get(ownerId);
+        if (cached != null && cached.version() == version && cached.compactDisplay() == compactDisplay) {
+            return new ArrayList<>(cached.entries());
+        }
+
+        List<DisplayEntry> built = buildDisplayEntries(manager.getItemView(ownerId), compactDisplay);
+        DISPLAY_CACHE.put(ownerId, new CachedDisplayEntries(version, compactDisplay, List.copyOf(built)));
+        return new ArrayList<>(built);
+    }
+
+    private static List<DisplayEntry> buildDisplayEntries(List<ItemStack> source, boolean compactDisplay) {
         if (!compactDisplay) {
             List<DisplayEntry> entries = new ArrayList<>();
             for (ItemStack item : source) {
-                entries.add(new DisplayEntry(item.clone(), item.getAmount()));
+                ItemStack snapshot = item.clone();
+                entries.add(new DisplayEntry(snapshot, snapshot.getAmount(), resolveSortName(snapshot)));
             }
             return entries;
         }
 
         List<DisplayEntry> entries = new ArrayList<>();
+        Map<Material, List<CompactEntry>> buckets = new java.util.HashMap<>();
         for (ItemStack item : source) {
-            DisplayEntry existing = null;
-            for (DisplayEntry entry : entries) {
-                if (ItemUtils.isSameItemWithNBT(entry.item(), item)) {
+            boolean itemHasMeta = item.hasItemMeta();
+            ItemMeta itemMeta = itemHasMeta ? item.getItemMeta() : null;
+            List<CompactEntry> bucket = buckets.computeIfAbsent(item.getType(), ignored -> new ArrayList<>());
+            CompactEntry existing = null;
+            for (CompactEntry entry : bucket) {
+                if (ItemUtils.isSameItemWithNBT(entry.item(), item, itemHasMeta, itemMeta)) {
                     existing = entry;
                     break;
                 }
@@ -572,9 +665,15 @@ public class ContainerGUI {
             if (existing == null) {
                 ItemStack template = item.clone();
                 template.setAmount(1);
-                entries.add(new DisplayEntry(template, item.getAmount()));
+                String sortName = resolveSortName(item, itemHasMeta, itemMeta);
+                int displayIndex = entries.size();
+                CompactEntry created = new CompactEntry(template, item.getAmount(), sortName, displayIndex);
+                bucket.add(created);
+                entries.add(new DisplayEntry(template, item.getAmount(), sortName));
             } else {
-                entries.set(entries.indexOf(existing), new DisplayEntry(existing.item(), existing.amount() + item.getAmount()));
+                int newAmount = existing.amount() + item.getAmount();
+                existing.setAmount(newAmount);
+                entries.set(existing.displayIndex(), new DisplayEntry(existing.item(), newAmount, existing.sortName));
             }
         }
         return entries;
@@ -582,8 +681,8 @@ public class ContainerGUI {
 
     private static void sortEntries(List<DisplayEntry> entries, SortMode mode) {
         switch (mode) {
-            case ABC_ASC -> entries.sort(Comparator.comparing(ContainerGUI::getSortName, String.CASE_INSENSITIVE_ORDER));
-            case ABC_DESC -> entries.sort(Comparator.comparing(ContainerGUI::getSortName, String.CASE_INSENSITIVE_ORDER).reversed());
+            case ABC_ASC -> entries.sort(Comparator.comparing(DisplayEntry::sortName, String.CASE_INSENSITIVE_ORDER));
+            case ABC_DESC -> entries.sort(Comparator.comparing(DisplayEntry::sortName, String.CASE_INSENSITIVE_ORDER).reversed());
             case AMOUNT_DESC -> entries.sort(Comparator.comparingInt(DisplayEntry::amount).reversed());
             case AMOUNT_ASC -> entries.sort(Comparator.comparingInt(DisplayEntry::amount));
             case NONE -> {
@@ -591,10 +690,14 @@ public class ContainerGUI {
         }
     }
 
-    private static String getSortName(DisplayEntry entry) {
-        ItemStack item = entry.item();
-        if (item.hasItemMeta() && item.getItemMeta().hasDisplayName()) {
-            return ChatColor.stripColor(item.getItemMeta().getDisplayName());
+    private static String resolveSortName(ItemStack item) {
+        boolean hasMeta = item.hasItemMeta();
+        return resolveSortName(item, hasMeta, hasMeta ? item.getItemMeta() : null);
+    }
+
+    private static String resolveSortName(ItemStack item, boolean hasMeta, ItemMeta meta) {
+        if (hasMeta && meta != null && meta.hasDisplayName()) {
+            return ChatColor.stripColor(meta.getDisplayName());
         }
         return item.getType().name();
     }
@@ -1164,13 +1267,13 @@ public class ContainerGUI {
         VContainer plugin = VContainer.getInstance();
         SellService sellService = plugin.getSellService();
         if (sellService == null || !sellService.isSellEnabled()) {
-            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            queueRefresh(ownerId);
             return;
         }
 
         int requested = getSellAmount(plugin, click, entry, compactDisplay);
         if (requested <= 0) {
-            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            queueRefresh(ownerId);
             return;
         }
         SellService.SellResult result = sellService.sell(player, manager, ownerId, entry.item(), requested);
@@ -1182,7 +1285,7 @@ public class ContainerGUI {
                     ? "{prefix} This item cannot be sold."
                     : "{prefix} The sell system is not available right now.";
             send(player, path, fallback);
-            Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+            queueRefresh(ownerId);
             return;
         }
 
@@ -1193,7 +1296,7 @@ public class ContainerGUI {
             sendSellMessage(player, result.amount(), getItemName(soldItem), ownerName, result.formattedPrice());
         }
 
-        Bukkit.getScheduler().runTask(plugin, () -> refreshViewerContainer(player, ownerId, ownerName, manager, page, storageBlockManager, storageKey));
+        queueRefresh(ownerId);
     }
 
     private static SellPreview createSellPreview(VContainer plugin, Player viewer, DisplayEntry entry, boolean sellEnabled) {
@@ -1260,6 +1363,59 @@ public class ContainerGUI {
         return ItemDisplayNames.resolve(item);
     }
 
+    private static void ensureRefreshTask() {
+        VContainer plugin = VContainer.getInstance();
+        if (plugin == null) return;
+        BukkitTask currentTask = refreshTask;
+        if (currentTask != null && !currentTask.isCancelled()) {
+            return;
+        }
+        synchronized (ContainerGUI.class) {
+            currentTask = refreshTask;
+            if (currentTask != null && !currentTask.isCancelled()) {
+                return;
+            }
+            refreshTask = Bukkit.getScheduler().runTaskTimer(plugin, ContainerGUI::drainQueuedRefreshes, REFRESH_INTERVAL_TICKS, REFRESH_INTERVAL_TICKS);
+        }
+    }
+
+    private static void drainQueuedRefreshes() {
+        if (QUEUED_REFRESHES.isEmpty()) {
+            return;
+        }
+
+        List<UUID> owners = new ArrayList<>(REFRESH_BATCH_OWNERS);
+        for (UUID ownerId : new ArrayList<>(QUEUED_REFRESHES)) {
+            if (!QUEUED_REFRESHES.remove(ownerId)) {
+                continue;
+            }
+            owners.add(ownerId);
+            if (owners.size() >= REFRESH_BATCH_OWNERS) {
+                break;
+            }
+        }
+
+        for (UUID ownerId : owners) {
+            refreshOpenContainers(ownerId);
+        }
+    }
+
+    private static boolean sameDisplayItem(ItemStack left, ItemStack right) {
+        if (left == right) return true;
+        if (left == null || right == null) return left == null && right == null;
+        if (left.getAmount() != right.getAmount()) return false;
+        return ItemUtils.isSameItemWithNBT(left, right);
+    }
+
+    private static void decrementOwnerViewCount(UUID ownerId) {
+        OWNER_VIEW_COUNTS.compute(ownerId, (ignored, count) -> {
+            if (count == null || count <= 1) {
+                return null;
+            }
+            return count - 1;
+        });
+    }
+
     private enum SortMode {
         NONE("None"),
         ABC_ASC("ABC A-Z"),
@@ -1285,7 +1441,13 @@ public class ContainerGUI {
         }
     }
 
-    private record DisplayEntry(ItemStack item, int amount) {
+    private record DisplayEntry(ItemStack item, int amount, String sortName) {
+    }
+
+    private record ViewRenderState(int page, int maxPage) {
+    }
+
+    private record CachedDisplayEntries(long version, boolean compactDisplay, List<DisplayEntry> entries) {
     }
 
     private record OpenContainerView(
@@ -1304,6 +1466,36 @@ public class ContainerGUI {
 
         private static SellPreview hidden() {
             return new SellPreview(false, "", "", "");
+        }
+    }
+
+    private static final class CompactEntry {
+        private final ItemStack item;
+        private final String sortName;
+        private final int displayIndex;
+        private int amount;
+
+        private CompactEntry(ItemStack item, int amount, String sortName, int displayIndex) {
+            this.item = item;
+            this.sortName = sortName;
+            this.displayIndex = displayIndex;
+            this.amount = amount;
+        }
+
+        private ItemStack item() {
+            return item;
+        }
+
+        private int amount() {
+            return amount;
+        }
+
+        private int displayIndex() {
+            return displayIndex;
+        }
+
+        private void setAmount(int amount) {
+            this.amount = amount;
         }
     }
 

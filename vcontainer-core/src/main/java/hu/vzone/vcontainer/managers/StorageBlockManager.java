@@ -3,7 +3,6 @@ package hu.vzone.vcontainer.managers;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import hu.vzone.vcontainer.VContainer;
-import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.api.events.StorageBlockHopperTransferEvent;
 import hu.vzone.vcontainer.storage.StorageSettings;
 import hu.vzone.vcontainer.utils.AuditLogger;
@@ -990,7 +989,6 @@ public class StorageBlockManager {
             int added = containerManager.addItemToContainer(ownerId, moving);
             if (added <= 0) return;
             AuditLogger.logSystem("hopper-input", ownerId.toString(), "amount=" + added + " item=" + item.getType() + " hopper=" + key(hopperBlock.getLocation()));
-            ContainerGUI.queueRefresh(ownerId);
             item.setAmount(item.getAmount() - added);
             inventory.setItem(slot, item.getAmount() > 0 ? item : null);
             return;
@@ -1014,7 +1012,6 @@ public class StorageBlockManager {
         target.setAmount(1);
         containerManager.takeItemFromContainer(ownerId, target, 1);
         AuditLogger.logSystem("hopper-output", ownerId.toString(), "amount=1 item=" + moving.getType() + " hopper=" + key(hopperBlock.getLocation()));
-        ContainerGUI.queueRefresh(ownerId);
     }
 
     private void spawnHologram(Location blockLocation) {

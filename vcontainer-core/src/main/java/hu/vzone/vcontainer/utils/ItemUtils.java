@@ -13,7 +13,6 @@ import java.util.Base64;
 import java.util.List;
 
 public class ItemUtils {
-
     public static boolean isSimilarStack(ItemStack a, ItemStack b) {
         if (a == null || b == null) return false;
         if (a.getType() != b.getType()) return false;
@@ -27,14 +26,30 @@ public class ItemUtils {
     public static boolean isSameItemWithNBT(ItemStack a, ItemStack b) {
         if (a == null || b == null) return false;
         if (a.getType() != b.getType()) return false;
+        boolean aHasMeta = a.hasItemMeta();
+        boolean bHasMeta = b.hasItemMeta();
+        if (aHasMeta != bHasMeta) return false;
+        if (!aHasMeta) return true;
 
         ItemMeta ma = a.getItemMeta();
         ItemMeta mb = b.getItemMeta();
         if (ma == null && mb == null) return true;
         if (ma == null || mb == null) return false;
-
-        // ItemMeta equals() figyelembe veszi az NBT-t is (display name, lore, enchant, PDC stb.)
         return ma.equals(mb);
+    }
+
+    public static boolean isSameItemWithNBT(ItemStack current, ItemStack target, boolean targetHasMeta, ItemMeta targetMeta) {
+        if (current == null || target == null) return false;
+        if (current.getType() != target.getType()) return false;
+
+        boolean currentHasMeta = current.hasItemMeta();
+        if (currentHasMeta != targetHasMeta) return false;
+        if (!currentHasMeta) return true;
+
+        ItemMeta currentMeta = current.getItemMeta();
+        if (currentMeta == null && targetMeta == null) return true;
+        if (currentMeta == null || targetMeta == null) return false;
+        return currentMeta.equals(targetMeta);
     }
 
     public static String itemsToBase64(List<ItemStack> items) throws IOException {

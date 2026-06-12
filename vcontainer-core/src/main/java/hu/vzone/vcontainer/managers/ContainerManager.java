@@ -3,7 +3,6 @@ package hu.vzone.vcontainer.managers;
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.api.events.ContainerAddItemEvent;
 import hu.vzone.vcontainer.api.events.ContainerWithdrawItemEvent;
-import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.storage.ContainerStorage;
 import hu.vzone.vcontainer.storage.LocalContainerStorage;
 import hu.vzone.vcontainer.storage.SqlContainerStorage;
@@ -30,15 +29,19 @@ public class ContainerManager {
     private final ContainerStorage storage;
     private final Map<UUID, List<ItemStack>> cache = new HashMap<>();
     private final Map<UUID, Long> dirtyVersions = new HashMap<>();
+    private final Map<UUID, Long> containerVersions = new HashMap<>();
     private final Object saveLock = new Object();
     private long mutationVersion;
     private BukkitTask autoSaveTask;
     private volatile boolean persistenceSuspended;
+    private volatile boolean stackEnabled;
+    private volatile int configuredMaxStack;
 
     public ContainerManager(VContainer plugin) {
         this.plugin = plugin;
         this.storage = createStorage(plugin);
         this.cache.putAll(cloneContainers(storage.loadAll()));
+        reloadRuntimeSettings();
         this.autoSaveTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
                 plugin,
                 this::flushDirtySync,
@@ -72,16 +75,16 @@ public class ContainerManager {
             return 0;
         }
 
-        boolean stackEnabled = plugin.getConfig().getBoolean("stack", true);
-        int maxStack = Math.max(1, plugin.getConfig().getInt("max-stack", 64));
         int added = 0;
 
         if (stackEnabled) {
             int amountToAdd = item.getAmount();
+            boolean targetHasMeta = item.hasItemMeta();
+            org.bukkit.inventory.meta.ItemMeta targetMeta = targetHasMeta ? item.getItemMeta() : null;
 
             for (ItemStack current : list) {
-                if (ItemUtils.isSameItemWithNBT(current, item)) {
-                    int space = Math.min(maxStack, current.getMaxStackSize()) - current.getAmount();
+                if (ItemUtils.isSameItemWithNBT(current, item, targetHasMeta, targetMeta)) {
+                    int space = Math.min(configuredMaxStack, current.getMaxStackSize()) - current.getAmount();
                     if (space > 0) {
                         int add = Math.min(space, amountToAdd);
                         current.setAmount(current.getAmount() + add);
@@ -93,7 +96,7 @@ public class ContainerManager {
             }
 
             while (amountToAdd > 0) {
-                int split = Math.min(amountToAdd, Math.min(maxStack, item.getMaxStackSize()));
+                int split = Math.min(amountToAdd, Math.min(configuredMaxStack, item.getMaxStackSize()));
                 ItemStack newStack = item.clone();
                 newStack.setAmount(split);
                 list.add(newStack);
@@ -101,7 +104,8 @@ public class ContainerManager {
                 added += split;
             }
         } else {
-            list.add(item.clone());
+            ItemStack clone = item.clone();
+            list.add(clone);
             added = item.getAmount();
         }
 
@@ -130,11 +134,13 @@ public class ContainerManager {
     private synchronized int takeItemFromContainerLocked(UUID ownerId, ItemStack target, int amount) {
         List<ItemStack> list = getOrCreate(ownerId);
         int remaining = amount;
+        boolean targetHasMeta = target.hasItemMeta();
+        org.bukkit.inventory.meta.ItemMeta targetMeta = targetHasMeta ? target.getItemMeta() : null;
 
         for (Iterator<ItemStack> it = list.iterator(); it.hasNext();) {
             ItemStack current = it.next();
             if (current == null) continue;
-            if (ItemUtils.isSameItemWithNBT(current, target)) {
+            if (ItemUtils.isSameItemWithNBT(current, target, targetHasMeta, targetMeta)) {
                 int remove = Math.min(current.getAmount(), remaining);
                 current.setAmount(current.getAmount() - remove);
                 remaining -= remove;
@@ -154,6 +160,10 @@ public class ContainerManager {
 
     public synchronized List<ItemStack> getAllItemFromContainer(UUID ownerId) {
         return Collections.unmodifiableList(cloneItems(getOrCreate(ownerId)));
+    }
+
+    public synchronized List<ItemStack> getItemView(UUID ownerId) {
+        return Collections.unmodifiableList(new ArrayList<>(getOrCreate(ownerId)));
     }
 
     public synchronized ItemStack peekFirstItem(UUID ownerId) {
@@ -211,13 +221,23 @@ public class ContainerManager {
         return dirtyVersions.size();
     }
 
+    public synchronized long getContainerVersion(UUID ownerId) {
+        return containerVersions.getOrDefault(ownerId, 0L);
+    }
+
+    public void reloadRuntimeSettings() {
+        stackEnabled = plugin.getConfig().getBoolean("stack", true);
+        configuredMaxStack = Math.max(1, plugin.getConfig().getInt("max-stack", 64));
+    }
+
     private synchronized List<ItemStack> getOrCreate(UUID id) {
         return cache.computeIfAbsent(id, ignored -> new ArrayList<>());
     }
 
     private synchronized void markDirty(UUID id) {
-        dirtyVersions.put(id, ++mutationVersion);
-        ContainerGUI.queueRefresh(id);
+        long version = ++mutationVersion;
+        dirtyVersions.put(id, version);
+        containerVersions.put(id, version);
     }
 
     private void flushDirtySync() {

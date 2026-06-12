@@ -223,6 +223,9 @@ public final class VContainer extends JavaPlugin {
 
     public void reloadMainConfig() {
         updateDefaultConfig();
+        if (containerManager != null) {
+            containerManager.reloadRuntimeSettings();
+        }
     }
 
     private void createMessageConfig() {
