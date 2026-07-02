@@ -48,6 +48,15 @@ public final class SkinProvider {
         if (property != null) TEXTURE_CACHE.put(player.getUniqueId(), property);
     }
 
+    public static void clear(UUID playerId) {
+        if (playerId == null) return;
+        TEXTURE_CACHE.remove(playerId);
+    }
+
+    public static void shutdown() {
+        TEXTURE_CACHE.clear();
+    }
+
     private static ProfileProperty readTexture(Player player) {
         PlayerProfile profile = player.getPlayerProfile();
         for (ProfileProperty property : profile.getProperties()) {

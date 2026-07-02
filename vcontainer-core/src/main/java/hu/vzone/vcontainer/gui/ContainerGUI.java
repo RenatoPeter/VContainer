@@ -89,6 +89,21 @@ public class ContainerGUI {
         VIEW_RENDER_STATES.remove(playerId);
     }
 
+    public static void shutdown() {
+        SORT_MODES.clear();
+        OPEN_VIEWS.clear();
+        VIEW_RENDER_STATES.clear();
+        OWNER_VIEW_COUNTS.clear();
+        DISPLAY_CACHE.clear();
+        QUEUED_REFRESHES.clear();
+        PAGINATED_CURRENT_PAGE_METHOD = null;
+        BukkitTask currentTask = refreshTask;
+        if (currentTask != null) {
+            currentTask.cancel();
+        }
+        refreshTask = null;
+    }
+
     public static void queueRefresh(UUID ownerId) {
         if (ownerId == null) return;
         if (OWNER_VIEW_COUNTS.getOrDefault(ownerId, 0) <= 0) return;
@@ -205,8 +220,9 @@ public class ContainerGUI {
             gui.setItem(itemSlot(plugin, "container", "sort", SORT_SLOT), ItemBuilder.from(sortButton).asGuiItem(event -> {
                 event.setCancelled(true);
                 if (event.getWhoClicked() instanceof Player player) {
-                    SORT_MODES.put(player.getUniqueId(), sortMode.next());
-                    refreshViewerContainer(player, ownerId, ownerName, manager, targetPage, storageBlockManager, storageKey);
+                    SortMode nextMode = SORT_MODES.getOrDefault(player.getUniqueId(), sortMode).next();
+                    SORT_MODES.put(player.getUniqueId(), nextMode);
+                    forceRenderViewerContainer(player, ownerId, ownerName, manager, targetPage, storageBlockManager, storageKey);
                 }
             }));
         }
@@ -264,6 +280,25 @@ public class ContainerGUI {
                     && applyLiveRefresh(current.gui(), viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey)) {
                 return;
             }
+            renderContainer(current.gui(), viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
+            return;
+        }
+        openContainer(viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
+    }
+
+    private static void forceRenderViewerContainer(
+            Player viewer,
+            UUID ownerId,
+            String ownerName,
+            ContainerManager manager,
+            int page,
+            StorageBlockManager storageBlockManager,
+            String storageKey
+    ) {
+        OpenContainerView current = OPEN_VIEWS.get(viewer.getUniqueId());
+        if (current != null
+                && current.ownerId().equals(ownerId)
+                && viewer.getOpenInventory().getTopInventory().getHolder() == current.gui()) {
             renderContainer(current.gui(), viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
             return;
         }
@@ -1410,6 +1445,8 @@ public class ContainerGUI {
     private static void decrementOwnerViewCount(UUID ownerId) {
         OWNER_VIEW_COUNTS.compute(ownerId, (ignored, count) -> {
             if (count == null || count <= 1) {
+                DISPLAY_CACHE.remove(ownerId);
+                QUEUED_REFRESHES.remove(ownerId);
                 return null;
             }
             return count - 1;
@@ -1522,7 +1559,7 @@ public class ContainerGUI {
             return switch (normalized) {
                 case "RIGHT CLICK" -> RIGHT_CLICK;
                 case "LEFT CLICK" -> LEFT_CLICK;
-                case "MIDDLE CLICK" -> MIDDLE_CLICK;
+                case "MIDDLE CLICK", "MOUSE3", "SCROLL CLICK", "WHEEL CLICK" -> MIDDLE_CLICK;
                 case "SHIFT + RIGHT CLICK", "SHIFT RIGHT CLICK" -> SHIFT_RIGHT_CLICK;
                 case "SHIFT + LEFT CLICK", "SHIFT LEFT CLICK" -> SHIFT_LEFT_CLICK;
                 case "ITEM DROP", "DROP" -> ITEM_DROP;
@@ -1535,7 +1572,7 @@ public class ContainerGUI {
             return switch (clickType) {
                 case RIGHT -> RIGHT_CLICK;
                 case LEFT -> LEFT_CLICK;
-                case MIDDLE -> MIDDLE_CLICK;
+                case MIDDLE, CREATIVE -> MIDDLE_CLICK;
                 case SHIFT_RIGHT -> SHIFT_RIGHT_CLICK;
                 case SHIFT_LEFT -> SHIFT_LEFT_CLICK;
                 case DROP -> ITEM_DROP;

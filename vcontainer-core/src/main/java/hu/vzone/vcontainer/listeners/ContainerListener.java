@@ -171,6 +171,7 @@ public class ContainerListener implements Listener {
     public void onQuit(PlayerQuitEvent event) {
         manager.clearCacheFor(event.getPlayer().getUniqueId());
         ContainerGUI.clearSortPreference(event.getPlayer().getUniqueId());
+        SkinProvider.clear(event.getPlayer().getUniqueId());
     }
 
     @EventHandler

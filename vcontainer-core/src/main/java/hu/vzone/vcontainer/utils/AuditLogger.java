@@ -52,7 +52,10 @@ public final class AuditLogger {
             flushTask.cancel();
             flushTask = null;
         }
-        if (plugin != null) flush(plugin);
+        if (plugin != null) {
+            flushAll(plugin);
+        }
+        QUEUE.clear();
     }
 
     private static void ensureTask(VContainer plugin) {
@@ -80,6 +83,16 @@ public final class AuditLogger {
                     java.nio.file.StandardOpenOption.APPEND);
         } catch (IOException e) {
             plugin.getLogger().warning("Failed to write audit log: " + e.getMessage());
+        }
+    }
+
+    private static void flushAll(VContainer plugin) {
+        while (!QUEUE.isEmpty()) {
+            int before = QUEUE.size();
+            flush(plugin);
+            if (QUEUE.size() == before) {
+                break;
+            }
         }
     }
 

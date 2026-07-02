@@ -6,6 +6,7 @@ import hu.vzone.vcontainer.api.VContainerAPI;
 import hu.vzone.vcontainer.api.impl.VContainerAPIImpl;
 import hu.vzone.vcontainer.commands.ContainerAdminCommand;
 import hu.vzone.vcontainer.commands.ContainerCommand;
+import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.listeners.ContainerListener;
 import hu.vzone.vcontainer.listeners.VortexMinionsHookListener;
 import hu.vzone.vcontainer.managers.ContainerManager;
@@ -16,6 +17,7 @@ import hu.vzone.vcontainer.utils.ConfigUpdater;
 import hu.vzone.vcontainer.utils.PlaceholderHook;
 import hu.vzone.vcontainer.utils.ServerVersionSupport;
 import hu.vzone.vcontainer.utils.AuditLogger;
+import hu.vzone.vcontainer.utils.SkinProvider;
 import hu.vzone.vcontainer.utils.UpdateChecker;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.minimessage.MiniMessage;
@@ -133,6 +135,8 @@ public final class VContainer extends JavaPlugin {
             Bukkit.getServicesManager().unregister(VContainerAPI.class, api);
         }
 
+        ContainerGUI.shutdown();
+        SkinProvider.shutdown();
         AuditLogger.shutdown();
         api = null;
         instance = null;
