@@ -7,8 +7,9 @@ import hu.vzone.vcontainer.api.impl.VContainerAPIImpl;
 import hu.vzone.vcontainer.commands.ContainerAdminCommand;
 import hu.vzone.vcontainer.commands.ContainerCommand;
 import hu.vzone.vcontainer.gui.ContainerGUI;
+import hu.vzone.vcontainer.hooks.VortexMinionsHookManager;
 import hu.vzone.vcontainer.listeners.ContainerListener;
-import hu.vzone.vcontainer.listeners.VortexMinionsHookListener;
+import hu.vzone.vcontainer.listeners.VortexMinionsLifecycleListener;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.sell.SellService;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
@@ -64,6 +65,7 @@ public final class VContainer extends JavaPlugin {
     private StorageBlockManager storageBlockManager;
     private SellService sellService;
     private UpdateChecker updateChecker;
+    private VortexMinionsHookManager vortexMinionsHookManager;
     private volatile boolean restartRequired;
     private volatile String restartReason = "";
 
@@ -91,6 +93,7 @@ public final class VContainer extends JavaPlugin {
         storageBlockManager = new StorageBlockManager(this, containerManager);
         sellService = new SellService(this);
         updateChecker = new UpdateChecker(this);
+        vortexMinionsHookManager = new VortexMinionsHookManager(this, containerManager, storageBlockManager);
         api = new VContainerAPIImpl(this, containerManager, storageBlockManager);
 
         Bukkit.getServicesManager().register(VContainerAPI.class, api, this, ServicePriority.Normal);
@@ -100,10 +103,8 @@ public final class VContainer extends JavaPlugin {
         getCommand("vcontainer").setExecutor(adminCommand);
         getCommand("vcontainer").setTabCompleter(adminCommand);
         Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, storageBlockManager), this);
-        if (Bukkit.getPluginManager().isPluginEnabled("VortexMinions")) {
-            Bukkit.getPluginManager().registerEvents(new VortexMinionsHookListener(containerManager, storageBlockManager), this);
-            getLogger().info("Hooked into VortexMinions.");
-        }
+        Bukkit.getPluginManager().registerEvents(new VortexMinionsLifecycleListener(this, vortexMinionsHookManager), this);
+        vortexMinionsHookManager.refreshHook();
         updateChecker.checkAsync();
 
         getLogger().info("VContainer v" + getDescription().getVersion() + " enabled successfully.");
@@ -127,6 +128,9 @@ public final class VContainer extends JavaPlugin {
         }
         if (storageBlockManager != null) {
             storageBlockManager.shutdown();
+        }
+        if (vortexMinionsHookManager != null) {
+            vortexMinionsHookManager.shutdown();
         }
 
         HandlerList.unregisterAll(this);

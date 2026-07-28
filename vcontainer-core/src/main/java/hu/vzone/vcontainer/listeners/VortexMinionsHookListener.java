@@ -3,6 +3,7 @@ package hu.vzone.vcontainer.listeners;
 import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import net.vortexdevelopment.vortexminions.api.chest.MinionChest;
+import net.vortexdevelopment.vortexminions.api.event.MinionBlockMineEvent;
 import net.vortexdevelopment.vortexminions.api.event.MinionChestLinkEvent;
 import net.vortexdevelopment.vortexminions.api.event.MinionItemTransferEvent;
 import net.vortexdevelopment.vortexminions.api.minion.Minion;
@@ -39,17 +40,34 @@ public final class VortexMinionsHookListener implements Listener {
 
         Block block = clickedLocation.getBlock();
         StorageBlockManager.StorageBlock storageBlock = storageBlockManager.get(block);
-        if (storageBlock == null || storageBlock.type() != StorageBlockManager.StorageType.PERSONAL) {
+        if (storageBlock == null) {
+            return;
+        }
+
+        event.setHandled(true);
+
+        if (storageBlock.type() != StorageBlockManager.StorageType.PERSONAL) {
+            event.setCancelled(true);
             return;
         }
 
         Minion minion = event.getMinion();
         if (minion == null || !canLink(minion, storageBlock)) {
+            event.setCancelled(true);
             return;
         }
 
         event.setChest(new VContainerMinionChest(minion, block.getLocation(), storageBlock.ownerId()));
-        event.setHandled(true);
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockMine(MinionBlockMineEvent event) {
+        Block block = event.getBlock();
+        if (block == null || !storageBlockManager.isStorageBlock(block)) {
+            return;
+        }
+        event.setPreventBlockBreak(true);
+        event.setCancelled(true);
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
