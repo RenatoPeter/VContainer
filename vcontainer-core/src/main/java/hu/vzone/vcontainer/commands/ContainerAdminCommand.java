@@ -168,17 +168,15 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
 
 //                opened: "{prefix} You opened {player}'s container"
                 if (action.equals("open")) {
+                    if (!require(sender, "vcontainer.admin.open")) return true;
                     if (!(sender instanceof Player)) {
                         sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("command.only-players-can-use", "{prefix} Only players can use this command!")));
                         return true;
                     }
-                    if (!(target instanceof Player onlineTarget)) {
-                        sender.sendMessage(plugin.formatMessage("{prefix} This player is offline."));
-                        return true;
-                    }
                     Player admin = (Player) sender;
-                    ContainerGUI.openContainerForAdmin(admin, onlineTarget, manager, 1);
-                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.open", "{prefix} You opened {player}'s container!").replace("{player}", target.getName())));
+                    String ownerName = target.getName() != null ? target.getName() : args[1];
+                    ContainerGUI.openContainerForAdmin(admin, target.getUniqueId(), ownerName, manager, 1);
+                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.open", "{prefix} You opened {player}'s container!").replace("{player}", ownerName)));
                 } else {
                     if (!require(sender, "vcontainer.admin.clear")) return true;
                     Runnable clearAction = () -> {

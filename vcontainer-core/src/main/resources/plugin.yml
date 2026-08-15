@@ -34,6 +34,7 @@ permissions:
     description: Allows using VContainer admin commands
     default: op
     children:
+      vcontainer.admin.open: true
       vcontainer.admin.reload: true
       vcontainer.admin.backup: true
       vcontainer.admin.migrate: true
@@ -47,6 +48,9 @@ permissions:
       vcontainer.admin.blocks.members: true
   vcontainer.admin.reload:
     description: Allows reloading VContainer configuration
+    default: op
+  vcontainer.admin.open:
+    description: Allows opening another player's container
     default: op
   vcontainer.admin.backup:
     description: Allows exporting and importing VContainer backups

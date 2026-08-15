@@ -76,6 +76,10 @@ public class ContainerGUI {
         openContainer(admin, owner.getUniqueId(), owner.getName(), manager, page);
     }
 
+    public static void openContainerForAdmin(Player admin, UUID ownerId, String ownerName, ContainerManager manager, int page) {
+        openContainer(admin, ownerId, ownerName, manager, page);
+    }
+
     public static void openContainerForStorage(Player viewer, UUID ownerId, String ownerName, ContainerManager manager, StorageBlockManager storageBlockManager, String storageKey) {
         openContainer(viewer, ownerId, ownerName, manager, 1, storageBlockManager, storageKey);
     }
