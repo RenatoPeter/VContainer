@@ -11,6 +11,10 @@
 # next to the setting.
 # ============================================================================
 
+# Enables the experimental Paper Dialog container view on supported clients.
+# Dialog item entries preserve CustomModelData and every original ItemStack component.
+Dialog: false
+
 # Player interaction rules inside containers.
 container-options:
   # If true, players can put items from their own inventory into the container.

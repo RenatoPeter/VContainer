@@ -7,6 +7,7 @@ import hu.vzone.vcontainer.api.impl.VContainerAPIImpl;
 import hu.vzone.vcontainer.commands.ContainerAdminCommand;
 import hu.vzone.vcontainer.commands.ContainerCommand;
 import hu.vzone.vcontainer.gui.ContainerGUI;
+import hu.vzone.vcontainer.gui.search.ContainerSearchPrompt;
 import hu.vzone.vcontainer.hooks.VortexMinionsHookManager;
 import hu.vzone.vcontainer.listeners.ContainerListener;
 import hu.vzone.vcontainer.listeners.VortexMinionsLifecycleListener;
@@ -103,8 +104,10 @@ public final class VContainer extends JavaPlugin {
         getCommand("vcontainer").setExecutor(adminCommand);
         getCommand("vcontainer").setTabCompleter(adminCommand);
         Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, storageBlockManager), this);
+        Bukkit.getPluginManager().registerEvents(new ContainerSearchPrompt(), this);
         Bukkit.getPluginManager().registerEvents(new VortexMinionsLifecycleListener(this, vortexMinionsHookManager), this);
         vortexMinionsHookManager.refreshHook();
+        vortexMinionsHookManager.startHealthCheck();
         updateChecker.checkAsync();
 
         getLogger().info("VContainer v" + getDescription().getVersion() + " enabled successfully.");
@@ -143,6 +146,7 @@ public final class VContainer extends JavaPlugin {
         }
 
         ContainerGUI.shutdown();
+        ContainerSearchPrompt.clearAll();
         SkinProvider.shutdown();
         AuditLogger.shutdown();
         api = null;

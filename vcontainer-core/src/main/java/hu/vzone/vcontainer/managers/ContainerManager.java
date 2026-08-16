@@ -1,6 +1,7 @@
 package hu.vzone.vcontainer.managers;
 
 import hu.vzone.vcontainer.VContainer;
+import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.api.events.ContainerAddItemEvent;
 import hu.vzone.vcontainer.api.events.ContainerWithdrawItemEvent;
 import hu.vzone.vcontainer.storage.ContainerStorage;
@@ -415,6 +416,16 @@ public class ContainerManager {
         long version = ++mutationVersion;
         dirtyVersions.put(id, version);
         containerVersions.put(id, version);
+        queueOpenViewRefresh(id);
+    }
+
+    /** All mutation sources (API, minions, hoppers and players) share this one live-view notification. */
+    private void queueOpenViewRefresh(UUID ownerId) {
+        if (Bukkit.isPrimaryThread()) {
+            ContainerGUI.queueRefresh(ownerId);
+            return;
+        }
+        Bukkit.getScheduler().runTask(plugin, () -> ContainerGUI.queueRefresh(ownerId));
     }
 
     private boolean isActiveBatchOperation(BatchTakeOperation operation) {

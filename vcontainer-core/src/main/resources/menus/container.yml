@@ -11,6 +11,7 @@
 # - decoration       = static filler/decorative item
 # - page-prev        = previous-page button
 # - page-next        = next-page button
+# - search            = opens the vanilla search input
 # - sort             = per-player sorting button
 # - storage-pickup   = personal storage pickup button, owner only
 # - storage-members  = personal storage member menu button, owner only
@@ -18,7 +19,7 @@
 gui-version: 2
 title: "&0Container %current-page%/%max-page%"
 rows: 6
-page-size: 45
+page-size: 36
 
 items:
   stored_items:
@@ -26,13 +27,14 @@ items:
     # The current GUI engine uses page-size for the amount of item slots.
     Action: container-item
     Slots:
-      - "0-44"
+      - "9-44"
 
   filler:
     # Decorative filler item for the bottom control row.
     Material: BLACK_STAINED_GLASS_PANE
     Action: decoration
     Slots:
+      - "0-8"
       - "45-53"
     Name: " "
 
@@ -45,6 +47,15 @@ items:
     Name: "&cᴘɪᴄᴋ ᴜᴘ ꜱᴛᴏʀᴀɢᴇ ʙʟᴏᴄᴋ"
     Lore:
       - "&7Returns this storage block item."
+
+  search:
+    # Opens the anvil-backed item name/material search prompt.
+    Material: COMPASS
+    Action: search
+    Slot: 4
+    Name: "&bSearch items"
+    Lore:
+      - "&7Search by material or display name."
 
   previous_page:
     # Optional previous-page button.

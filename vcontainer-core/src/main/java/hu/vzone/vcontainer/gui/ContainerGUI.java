@@ -9,6 +9,10 @@ import hu.vzone.vcontainer.managers.ContainerManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager;
 import hu.vzone.vcontainer.managers.StorageBlockManager.StorageBlock;
 import hu.vzone.vcontainer.sell.SellService;
+import hu.vzone.vcontainer.gui.item.AggregatedItem;
+import hu.vzone.vcontainer.gui.item.ItemAggregationService;
+import hu.vzone.vcontainer.gui.session.ContainerViewSessions;
+import hu.vzone.vcontainer.gui.search.ContainerSearchPrompt;
 import hu.vzone.vcontainer.utils.ConfigItemBuilder;
 import hu.vzone.vcontainer.utils.AuditLogger;
 import hu.vzone.vcontainer.utils.ItemUtils;
@@ -52,6 +56,7 @@ public class ContainerGUI {
     private static final int ROWS = 6;
     private static final int PAGE_SIZE = 45;
     private static final int PICKUP_SLOT = 45;
+    private static final int SEARCH_SLOT = 47;
     private static final int PREVIOUS_SLOT = 48;
     private static final int SORT_SLOT = 49;
     private static final int NEXT_SLOT = 50;
@@ -85,6 +90,9 @@ public class ContainerGUI {
     }
 
     public static void clearSortPreference(UUID playerId) {
+        ContainerDialogGUI.clear(playerId);
+        ContainerViewSessions.clear(playerId);
+        ContainerSearchPrompt.clear(playerId);
         SORT_MODES.remove(playerId);
         OpenContainerView removed = OPEN_VIEWS.remove(playerId);
         if (removed != null) {
@@ -94,6 +102,8 @@ public class ContainerGUI {
     }
 
     public static void shutdown() {
+        ContainerDialogGUI.shutdown();
+        ContainerViewSessions.clearAll();
         SORT_MODES.clear();
         OPEN_VIEWS.clear();
         VIEW_RENDER_STATES.clear();
@@ -124,6 +134,13 @@ public class ContainerGUI {
             send(viewer, "container.loading", "{prefix} Storage data is still loading. Please try again in a moment.");
             return;
         }
+        if (ContainerDialogGUI.open(viewer, ownerId, ownerName, manager, storageBlockManager, storageKey)) {
+            return;
+        }
+        openClassicContainer(viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey);
+    }
+
+    static void openClassicContainer(Player viewer, UUID ownerId, String ownerName, ContainerManager manager, int page, StorageBlockManager storageBlockManager, String storageKey) {
         PaginatedGui gui = Gui.paginated()
                 .title(title(VContainer.getInstance(), 1, 1))
                 .rows(menuRows(VContainer.getInstance(), "container", ROWS))
@@ -151,11 +168,13 @@ public class ContainerGUI {
         boolean withdrawMessages = plugin.getConfig().getBoolean("container-options.messages.withdraw", true);
         boolean sellMessages = plugin.getConfig().getBoolean("container-options.messages.sell", true);
         boolean shiftDepositAll = plugin.getConfig().getBoolean("container-options.shift-transfer.deposit-all", true);
-        boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+        // Dialog item bodies are unsafe on Paper 1.21.11, so Dialog mode uses this safe item grid.
+        boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
         SellService sellService = plugin.getSellService();
         boolean sellEnabled = sellService != null && sellService.isSellEnabled();
 
-        List<DisplayEntry> items = getDisplayEntries(manager, ownerId, compactDisplay);
+        List<DisplayEntry> items = filterDisplayEntries(getDisplayEntries(manager, ownerId, compactDisplay), ContainerViewSessions.search(viewer.getUniqueId()));
         SortMode sortMode = SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE);
         sortEntries(items, sortMode);
         int pageSize = menuPageSize(plugin, "container", PAGE_SIZE);
@@ -222,6 +241,18 @@ public class ContainerGUI {
         applyStaticItems(gui, plugin, "container");
 
         addStorageOwnerButtons(gui, plugin, viewer, ownerId, ownerName, manager, storageBlockManager, storageKey);
+
+        ItemStack searchButton = createConfiguredButton(plugin, "container", "search");
+        if (searchButton != null) {
+            gui.setItem(itemSlot(plugin, "container", "search", SEARCH_SLOT), ItemBuilder.from(searchButton).asGuiItem(event -> {
+                event.setCancelled(true);
+                if (!(event.getWhoClicked() instanceof Player player)) return;
+                ContainerSearchPrompt.open(player, ContainerViewSessions.search(player.getUniqueId()), query -> {
+                    ContainerViewSessions.setSearch(player.getUniqueId(), query);
+                    refreshViewerContainer(player, ownerId, ownerName, manager, 1, storageBlockManager, storageKey);
+                });
+            }));
+        }
 
         ItemStack sortButton = createSortButton(plugin, sortMode);
         if (sortButton != null) {
@@ -369,7 +400,8 @@ public class ContainerGUI {
             return;
         }
 
-        boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+        boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
         List<DisplayEntry> baseEntries = getDisplayEntries(matchingViews.get(0).manager(), ownerId, compactDisplay);
         boolean retryLater = false;
 
@@ -386,7 +418,7 @@ public class ContainerGUI {
                 continue;
             }
 
-            List<DisplayEntry> sortedEntries = new ArrayList<>(baseEntries);
+            List<DisplayEntry> sortedEntries = filterDisplayEntries(baseEntries, ContainerViewSessions.search(view.viewerId()));
             sortEntries(sortedEntries, SORT_MODES.getOrDefault(view.viewerId(), SortMode.NONE));
 
             if (!applyLiveRefresh(
@@ -439,8 +471,9 @@ public class ContainerGUI {
     ) {
         VContainer plugin = VContainer.getInstance();
         if (plugin == null) return false;
-        boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
-        List<DisplayEntry> items = getDisplayEntries(manager, ownerId, compactDisplay);
+        boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+        List<DisplayEntry> items = filterDisplayEntries(getDisplayEntries(manager, ownerId, compactDisplay), ContainerViewSessions.search(viewer.getUniqueId()));
         sortEntries(items, SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE));
         return applyLiveRefresh(gui, viewer, ownerId, ownerName, manager, page, storageBlockManager, storageKey, items);
     }
@@ -461,7 +494,8 @@ public class ContainerGUI {
             if (plugin == null) return false;
             boolean allowWithdraw = plugin.getConfig().getBoolean("container-options.allow-withdraw", true);
             boolean sellMessages = plugin.getConfig().getBoolean("container-options.messages.sell", true);
-            boolean compactDisplay = plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
+            boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                    || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
             boolean sellEnabled = plugin.getSellService() != null && plugin.getSellService().isSellEnabled();
 
             int pageSize = menuPageSize(plugin, "container", PAGE_SIZE);
@@ -692,34 +726,22 @@ public class ContainerGUI {
         }
 
         List<DisplayEntry> entries = new ArrayList<>();
-        Map<Material, List<CompactEntry>> buckets = new java.util.HashMap<>();
-        for (ItemStack item : source) {
-            boolean itemHasMeta = item.hasItemMeta();
-            ItemMeta itemMeta = itemHasMeta ? item.getItemMeta() : null;
-            List<CompactEntry> bucket = buckets.computeIfAbsent(item.getType(), ignored -> new ArrayList<>());
-            CompactEntry existing = null;
-            for (CompactEntry entry : bucket) {
-                if (ItemUtils.isSameItemWithNBT(entry.item(), item, itemHasMeta, itemMeta)) {
-                    existing = entry;
-                    break;
-                }
-            }
-
-            if (existing == null) {
-                ItemStack template = item.clone();
-                template.setAmount(1);
-                String sortName = resolveSortName(item, itemHasMeta, itemMeta);
-                int displayIndex = entries.size();
-                CompactEntry created = new CompactEntry(template, item.getAmount(), sortName, displayIndex);
-                bucket.add(created);
-                entries.add(new DisplayEntry(template, item.getAmount(), sortName));
-            } else {
-                int newAmount = existing.amount() + item.getAmount();
-                existing.setAmount(newAmount);
-                entries.set(existing.displayIndex(), new DisplayEntry(existing.item(), newAmount, existing.sortName));
-            }
+        for (AggregatedItem entry : ItemAggregationService.aggregate(source)) {
+            entries.add(new DisplayEntry(entry.template(), entry.amount(), entry.searchName()));
         }
         return entries;
+    }
+
+    private static List<DisplayEntry> filterDisplayEntries(List<DisplayEntry> entries, String query) {
+        String normalizedQuery = ItemAggregationService.normalize(query);
+        if (normalizedQuery.isEmpty()) return new ArrayList<>(entries);
+
+        List<DisplayEntry> filtered = new ArrayList<>();
+        for (DisplayEntry entry : entries) {
+            String searchable = ItemAggregationService.normalize(entry.sortName() + " " + entry.item().getType().name());
+            if (searchable.contains(normalizedQuery)) filtered.add(entry);
+        }
+        return filtered;
     }
 
     private static void sortEntries(List<DisplayEntry> entries, SortMode mode) {
