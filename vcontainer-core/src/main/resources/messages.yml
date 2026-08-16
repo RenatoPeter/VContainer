@@ -12,6 +12,8 @@ prefix: "<gradient:#1378FF:#60BFFB>VContainer</gradient> &8»&7"
 
 # Messages used while players interact with containers.
 container:
+  # Sent while the asynchronously loaded container cache is not ready yet.
+  loading: "{prefix} Storage data is still loading. Please try again in a moment."
   # Sent after items are deposited into a container. Placeholders: {amount}, {item}
   deposit: "{prefix} You put {amount} of {item} into the container."
   # Sent after items are withdrawn from a container. Placeholders: {amount}, {item}
@@ -22,6 +24,12 @@ container:
   sell-unavailable: "{prefix} This item cannot be sold."
   # Sent when the selected sell provider or currency provider is not available.
   sell-provider-unavailable: "{prefix} The sell system is not available right now."
+  # Sent when a large sale has been accepted and is being processed in batches.
+  sell-processing: "{prefix} Your large sale is being processed."
+  # Sent when this container already has a large sale in progress.
+  sell-in-progress: "{prefix} A sale is already in progress for this container."
+  # Sent when the configured maximum number of concurrent large sales is reached.
+  sell-queue-busy: "{prefix} Too many sales are being processed right now. Please try again shortly."
   # Sent when a withdraw action cannot fit into the player's inventory.
   inventory-full: "{prefix} Your inventory is full."
   # Sent when an item is rejected by storage limits or item blacklist settings.

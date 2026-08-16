@@ -120,6 +120,10 @@ public class ContainerGUI {
     }
 
     private static void openContainer(Player viewer, UUID ownerId, String ownerName, ContainerManager manager, int page, StorageBlockManager storageBlockManager, String storageKey) {
+        if (!manager.isInitialLoadComplete()) {
+            send(viewer, "container.loading", "{prefix} Storage data is still loading. Please try again in a moment.");
+            return;
+        }
         PaginatedGui gui = Gui.paginated()
                 .title(title(VContainer.getInstance(), 1, 1))
                 .rows(menuRows(VContainer.getInstance(), "container", ROWS))
@@ -1315,7 +1319,44 @@ public class ContainerGUI {
             queueRefresh(ownerId);
             return;
         }
+
+        if (requested >= sellService.bulkSaleThreshold()) {
+            SellService.BulkSellStart start = sellService.startBulkSell(
+                    player,
+                    manager,
+                    ownerId,
+                    entry.item(),
+                    requested,
+                    result -> handleSellResult(player, ownerId, ownerName, entry.item(), result, sellMessages)
+            );
+            if (start.started()) {
+                send(player, "container.sell-processing", "{prefix} Your large sale is being processed.");
+                return;
+            }
+            if (start.alreadyInProgress()) {
+                send(player, "container.sell-in-progress", "{prefix} A sale is already in progress for this container.");
+                return;
+            }
+            if (start.busy()) {
+                send(player, "container.sell-queue-busy", "{prefix} Too many sales are being processed right now. Please try again shortly.");
+                return;
+            }
+            handleSellResult(player, ownerId, ownerName, entry.item(), SellService.SellResult.failed(start.reason()), sellMessages);
+            return;
+        }
+
         SellService.SellResult result = sellService.sell(player, manager, ownerId, entry.item(), requested);
+        handleSellResult(player, ownerId, ownerName, entry.item(), result, sellMessages);
+    }
+
+    private static void handleSellResult(
+            Player player,
+            UUID ownerId,
+            String ownerName,
+            ItemStack sourceItem,
+            SellService.SellResult result,
+            boolean sellMessages
+    ) {
         if (!result.success()) {
             String path = result.reason() == SellService.UnavailableReason.NO_PRICE
                     ? "container.sell-unavailable"
@@ -1328,7 +1369,7 @@ public class ContainerGUI {
             return;
         }
 
-        ItemStack soldItem = entry.item().clone();
+        ItemStack soldItem = sourceItem.clone();
         soldItem.setAmount(result.amount());
         AuditLogger.log("container-sell", player, ownerId.toString(), "amount=" + result.amount() + " item=" + getItemName(soldItem) + " price=" + result.totalPrice());
         if (sellMessages) {

@@ -123,6 +123,9 @@ public final class VContainer extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        if (sellService != null) {
+            sellService.shutdown();
+        }
         if (containerManager != null) {
             containerManager.flushAllSync();
         }
@@ -234,6 +237,9 @@ public final class VContainer extends JavaPlugin {
         if (containerManager != null) {
             containerManager.reloadRuntimeSettings();
         }
+        if (sellService != null) {
+            sellService.reload();
+        }
     }
 
     private void createMessageConfig() {
@@ -293,6 +299,9 @@ public final class VContainer extends JavaPlugin {
     public void reloadPricesConfig() {
         if (pricesConfigFile.exists()) {
             pricesConfig = YamlConfiguration.loadConfiguration(pricesConfigFile);
+            if (sellService != null) {
+                sellService.reload();
+            }
             return;
         }
 

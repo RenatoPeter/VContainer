@@ -11,16 +11,24 @@ import org.bukkit.plugin.Plugin;
 
 import java.lang.reflect.Method;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.logging.Level;
+import org.bukkit.scheduler.BukkitTask;
 
 public class SellService {
 
     private final VContainer plugin;
+    private final Map<Material, Double> ownPriceCache = new ConcurrentHashMap<>();
+    private final Map<UUID, BulkSellJob> bulkSellJobs = new ConcurrentHashMap<>();
     private volatile boolean loggedVaultHookError;
     private volatile boolean loggedShopGuiPlusHookError;
     private volatile boolean loggedEconomyShopGuiHookError;
     private volatile boolean loggedEconomyShopGuiLimitUpdateError;
+    private BukkitTask bulkSellTask;
 
     public SellService(VContainer plugin) {
         this.plugin = plugin;
@@ -36,6 +44,67 @@ public class SellService {
 
     public boolean canSell(Player player, ItemStack item, int amount) {
         return quote(player, item, amount).sellable();
+    }
+
+    /** Clears configuration-derived price data after a plugin or prices.yml reload. */
+    public void reload() {
+        ownPriceCache.clear();
+    }
+
+    /**
+     * Begins a bounded sell transaction for a large amount. Bukkit, Vault and shop-provider APIs
+     * stay on the server thread; only the container scan is spread across later ticks.
+     */
+    public BulkSellStart startBulkSell(
+            Player player,
+            ContainerManager manager,
+            UUID ownerId,
+            ItemStack item,
+            int amount,
+            Consumer<SellResult> completion
+    ) {
+        if (player == null || manager == null || ownerId == null || item == null || amount <= 0) {
+            return BulkSellStart.failure(UnavailableReason.NO_PRICE);
+        }
+        if (bulkSellJobs.containsKey(ownerId) || manager.isBulkOperationActive(ownerId)) {
+            return BulkSellStart.alreadyRunning();
+        }
+        if (bulkSellJobs.size() >= maxActiveBulkSales()) {
+            return BulkSellStart.atCapacity();
+        }
+
+        // Quote once before removing anything. Provider APIs may be stateful and must not run async.
+        SellQuote quote = quote(player, item, amount);
+        if (!quote.sellable()) {
+            return BulkSellStart.failure(quote.reason());
+        }
+
+        ContainerManager.BatchTakeOperation operation = manager.beginBatchTake(ownerId, item, amount);
+        if (operation == null) {
+            return BulkSellStart.alreadyRunning();
+        }
+
+        bulkSellJobs.put(ownerId, new BulkSellJob(player, manager, ownerId, operation, quote, completion));
+        ensureBulkSellTask();
+        return BulkSellStart.success();
+    }
+
+    public int bulkSaleThreshold() {
+        return Math.max(1, plugin.getConfig().getInt("container-options.sell.bulk-processing.threshold", 512));
+    }
+
+    public void shutdown() {
+        BukkitTask task = bulkSellTask;
+        if (task != null) {
+            task.cancel();
+        }
+        bulkSellTask = null;
+
+        for (BulkSellJob job : bulkSellJobs.values()) {
+            job.manager.rollbackBatchTake(job.operation);
+        }
+        bulkSellJobs.clear();
+        ownPriceCache.clear();
     }
 
     public SellQuote quote(Player player, ItemStack item, int amount) {
@@ -109,23 +178,101 @@ public class SellService {
     }
 
     private SellQuote quoteOwn(ItemStack item) {
-        ConfigurationSection prices = plugin.getPricesConfig().getConfigurationSection("prices");
-        if (prices == null) {
-            return SellQuote.unsellable(UnavailableReason.PROVIDER_UNAVAILABLE, "");
-        }
-
-        String materialKey = item.getType().name();
-        if (!prices.contains(materialKey)) {
-            return SellQuote.unsellable(UnavailableReason.NO_PRICE, "");
-        }
-
-        double unitPrice = prices.getDouble(materialKey, -1.0D);
+        double unitPrice = ownPriceCache.computeIfAbsent(item.getType(), this::loadOwnUnitPrice);
         if (unitPrice < 0.0D) {
             return SellQuote.unsellable(UnavailableReason.NO_PRICE, "");
         }
 
         double total = unitPrice * item.getAmount();
         return SellQuote.sellable(total, formatPrice(total), () -> {});
+    }
+
+    private double loadOwnUnitPrice(Material material) {
+        ConfigurationSection prices = plugin.getPricesConfig().getConfigurationSection("prices");
+        if (prices == null || !prices.contains(material.name())) {
+            return -1.0D;
+        }
+        return prices.getDouble(material.name(), -1.0D);
+    }
+
+    private void ensureBulkSellTask() {
+        BukkitTask current = bulkSellTask;
+        if (current != null && !current.isCancelled()) {
+            return;
+        }
+        bulkSellTask = Bukkit.getScheduler().runTaskTimer(plugin, this::processBulkSales, 1L, 1L);
+    }
+
+    private void processBulkSales() {
+        if (bulkSellJobs.isEmpty()) {
+            BukkitTask current = bulkSellTask;
+            if (current != null) {
+                current.cancel();
+            }
+            bulkSellTask = null;
+            return;
+        }
+
+        int maxStacks = maxStacksPerTick();
+        for (BulkSellJob job : bulkSellJobs.values()) {
+            try {
+                processBulkSale(job, maxStacks);
+            } catch (RuntimeException ex) {
+                plugin.getLogger().log(Level.WARNING, "Bulk container sale failed and was rolled back.", ex);
+                finishBulkSale(job, SellResult.failed(UnavailableReason.CURRENCY_UNAVAILABLE), true);
+            }
+        }
+    }
+
+    private void processBulkSale(BulkSellJob job, int maxStacks) {
+        ContainerManager.BatchTakeProgress progress = job.manager.processBatchTake(job.operation, maxStacks);
+        if (!progress.active()) {
+            finishBulkSale(job, SellResult.failed(UnavailableReason.NO_PRICE), true);
+            return;
+        }
+        if (!progress.complete()) {
+            return;
+        }
+        if (progress.remaining() != 0) {
+            finishBulkSale(job, SellResult.failed(UnavailableReason.NO_PRICE), true);
+            return;
+        }
+
+        // The operation remains locked until the money transaction and commit are both done.
+        if (!deposit(job.player, job.quote.totalPrice())) {
+            finishBulkSale(job, SellResult.failed(UnavailableReason.CURRENCY_UNAVAILABLE), true);
+            return;
+        }
+        if (!job.manager.commitBatchTake(job.operation)) {
+            plugin.getLogger().severe("Could not commit a completed bulk container sale for " + job.ownerId + ".");
+            finishBulkSale(job, SellResult.failed(UnavailableReason.CURRENCY_UNAVAILABLE), true);
+            return;
+        }
+
+        job.quote.complete();
+        finishBulkSale(job, SellResult.success(job.operation.requested(), job.quote.totalPrice(), job.quote.formattedPrice()), false);
+    }
+
+    private void finishBulkSale(BulkSellJob job, SellResult result, boolean rollback) {
+        if (!bulkSellJobs.remove(job.ownerId, job)) {
+            return;
+        }
+        if (rollback) {
+            job.manager.rollbackBatchTake(job.operation);
+        }
+        try {
+            job.completion.accept(result);
+        } catch (RuntimeException ex) {
+            plugin.getLogger().log(Level.WARNING, "Bulk sale completion callback failed.", ex);
+        }
+    }
+
+    private int maxStacksPerTick() {
+        return Math.max(1, Math.min(4096, plugin.getConfig().getInt("container-options.sell.bulk-processing.max-stacks-per-tick", 256)));
+    }
+
+    private int maxActiveBulkSales() {
+        return Math.max(1, Math.min(128, plugin.getConfig().getInt("container-options.sell.bulk-processing.max-active-sales", 16)));
     }
 
     private SellQuote quoteShopGuiPlus(Player player, ItemStack item) {
@@ -390,5 +537,33 @@ public class SellService {
         public static SellResult failed(UnavailableReason reason) {
             return new SellResult(false, 0, 0.0D, "", reason);
         }
+    }
+
+    public record BulkSellStart(boolean started, boolean alreadyInProgress, boolean busy, UnavailableReason reason) {
+        private static BulkSellStart success() {
+            return new BulkSellStart(true, false, false, null);
+        }
+
+        private static BulkSellStart alreadyRunning() {
+            return new BulkSellStart(false, true, false, null);
+        }
+
+        private static BulkSellStart atCapacity() {
+            return new BulkSellStart(false, false, true, null);
+        }
+
+        private static BulkSellStart failure(UnavailableReason reason) {
+            return new BulkSellStart(false, false, false, reason);
+        }
+    }
+
+    private record BulkSellJob(
+            Player player,
+            ContainerManager manager,
+            UUID ownerId,
+            ContainerManager.BatchTakeOperation operation,
+            SellQuote quote,
+            Consumer<SellResult> completion
+    ) {
     }
 }

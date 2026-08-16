@@ -55,6 +55,18 @@ container-options:
     # Placeholder text used when a price is missing but the sell lore is still shown.
     unavailable-price-placeholder: "&cN/A"
 
+    # Large sales are split into small server-thread batches. Bukkit, Vault and
+    # shop plugin APIs are not thread-safe, so moving them to an async thread
+    # would risk data corruption and economy inconsistencies.
+    bulk-processing:
+      # Amount from which a sale is processed over multiple ticks.
+      threshold: 512
+      # Maximum stored item stacks removed per active sale each tick.
+      # Lower values take longer but further reduce TPS impact.
+      max-stacks-per-tick: 256
+      # Limits concurrent large sales to keep total per-tick work bounded.
+      max-active-sales: 16
+
   # Compact display merges equal stored items visually into one icon.
   # This does not remove the stored item data; it only changes how the GUI shows it.
   compact-display:
