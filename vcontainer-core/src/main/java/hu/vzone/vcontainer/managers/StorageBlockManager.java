@@ -4,6 +4,7 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 import hu.vzone.vcontainer.VContainer;
 import hu.vzone.vcontainer.api.events.StorageBlockHopperTransferEvent;
+import hu.vzone.vcontainer.gui.ContainerGUI;
 import hu.vzone.vcontainer.storage.StorageSettings;
 import hu.vzone.vcontainer.utils.AuditLogger;
 import hu.vzone.vcontainer.utils.ItemUtils;
@@ -991,6 +992,8 @@ public class StorageBlockManager {
             AuditLogger.logSystem("hopper-input", ownerId.toString(), "amount=" + added + " item=" + item.getType() + " hopper=" + key(hopperBlock.getLocation()));
             item.setAmount(item.getAmount() - added);
             inventory.setItem(slot, item.getAmount() > 0 ? item : null);
+            updateHopperState(hopper);
+            ContainerGUI.queueRefresh(ownerId);
             return;
         }
     }
@@ -1006,12 +1009,26 @@ public class StorageBlockManager {
         StorageBlockHopperTransferEvent event = new StorageBlockHopperTransferEvent(ownerId, hopperBlock, moving, StorageBlockHopperTransferEvent.Direction.OUT_OF_CONTAINER);
         Bukkit.getPluginManager().callEvent(event);
         if (event.isCancelled()) return;
-        if (!inventory.addItem(moving).isEmpty()) return;
 
         ItemStack target = moving.clone();
         target.setAmount(1);
-        containerManager.takeItemFromContainer(ownerId, target, 1);
+        int removed = containerManager.takeItemFromContainer(ownerId, target, 1);
+        if (removed <= 0) return;
+
+        if (!inventory.addItem(moving).isEmpty()) {
+            // The item has already left the virtual container, so put it back if the hopper changed meanwhile.
+            containerManager.addItemToContainer(ownerId, moving);
+            return;
+        }
+
+        updateHopperState(hopper);
+        ContainerGUI.queueRefresh(ownerId);
         AuditLogger.logSystem("hopper-output", ownerId.toString(), "amount=1 item=" + moving.getType() + " hopper=" + key(hopperBlock.getLocation()));
+    }
+
+    private void updateHopperState(Hopper hopper) {
+        // Applying physics notifies comparators and connected redstone after a plugin-driven inventory mutation.
+        hopper.update(true, true);
     }
 
     private void spawnHologram(Location blockLocation) {
