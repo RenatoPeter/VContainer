@@ -254,7 +254,7 @@ final class ContainerDialogGUI {
         give.setAmount(removed);
         Map<Integer, ItemStack> leftovers = player.getInventory().addItem(give);
         for (ItemStack leftover : leftovers.values()) {
-            state.manager.addItemToContainer(state.ownerId, leftover);
+            state.manager.restoreItemToContainer(state.ownerId, leftover);
         }
     }
 

@@ -270,8 +270,9 @@ storage-block:
 # If false, items added at different times stay as separate entries.
 stack: true
 
-# Maximum stack size used while adding items when stack is enabled.
-max-stack: 64
+# Maximum virtual stack size used while adding items when stack is enabled.
+# Set to -1 for one unlimited storage entry per identical item.
+max-stack: -1
 
 # Per-player storage quota and item blocking rules.
 storage-limits:

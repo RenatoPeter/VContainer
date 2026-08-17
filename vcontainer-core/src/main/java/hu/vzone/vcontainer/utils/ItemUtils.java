@@ -52,6 +52,21 @@ public class ItemUtils {
         return currentMeta.equals(targetMeta);
     }
 
+    /**
+     * Compares the complete serialized item data while deliberately ignoring its amount.
+     * GUI withdrawals use this stricter check so two custom items with visually equal meta
+     * can never be substituted for one another.
+     */
+    public static boolean isSameStoredItem(ItemStack current, ItemStack target, boolean targetHasMeta, ItemMeta targetMeta) {
+        if (!isSameItemWithNBT(current, target, targetHasMeta, targetMeta)) return false;
+
+        ItemStack currentFingerprint = current.clone();
+        ItemStack targetFingerprint = target.clone();
+        currentFingerprint.setAmount(1);
+        targetFingerprint.setAmount(1);
+        return java.util.Arrays.equals(currentFingerprint.serializeAsBytes(), targetFingerprint.serializeAsBytes());
+    }
+
     public static String itemsToBase64(List<ItemStack> items) throws IOException {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
              BukkitObjectOutputStream boos = new BukkitObjectOutputStream(baos)) {

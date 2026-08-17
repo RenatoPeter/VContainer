@@ -170,6 +170,7 @@ public class ContainerGUI {
         boolean shiftDepositAll = plugin.getConfig().getBoolean("container-options.shift-transfer.deposit-all", true);
         // Dialog item bodies are unsafe on Paper 1.21.11, so Dialog mode uses this safe item grid.
         boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                || manager.usesUnlimitedStacks()
                 || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
         SellService sellService = plugin.getSellService();
         boolean sellEnabled = sellService != null && sellService.isSellEnabled();
@@ -401,6 +402,7 @@ public class ContainerGUI {
         }
 
         boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                || matchingViews.get(0).manager().usesUnlimitedStacks()
                 || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
         List<DisplayEntry> baseEntries = getDisplayEntries(matchingViews.get(0).manager(), ownerId, compactDisplay);
         boolean retryLater = false;
@@ -472,6 +474,7 @@ public class ContainerGUI {
         VContainer plugin = VContainer.getInstance();
         if (plugin == null) return false;
         boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                || manager.usesUnlimitedStacks()
                 || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
         List<DisplayEntry> items = filterDisplayEntries(getDisplayEntries(manager, ownerId, compactDisplay), ContainerViewSessions.search(viewer.getUniqueId()));
         sortEntries(items, SORT_MODES.getOrDefault(viewer.getUniqueId(), SortMode.NONE));
@@ -495,6 +498,7 @@ public class ContainerGUI {
             boolean allowWithdraw = plugin.getConfig().getBoolean("container-options.allow-withdraw", true);
             boolean sellMessages = plugin.getConfig().getBoolean("container-options.messages.sell", true);
             boolean compactDisplay = plugin.getConfig().getBoolean("Dialog", false)
+                    || manager.usesUnlimitedStacks()
                     || plugin.getConfig().getBoolean("container-options.compact-display.enabled", false);
             boolean sellEnabled = plugin.getSellService() != null && plugin.getSellService().isSellEnabled();
 
@@ -601,7 +605,7 @@ public class ContainerGUI {
                 return;
             }
 
-            int taken = manager.takeItemFromContainer(ownerId, target, Math.min(requested, fit));
+            int taken = manager.takeItemFromContainerAtVersion(ownerId, target, Math.min(requested, fit), entry.containerVersion());
             if (taken <= 0) {
                 queueRefresh(ownerId);
                 return;
@@ -609,12 +613,23 @@ public class ContainerGUI {
 
             ItemStack toGive = target.clone();
             toGive.setAmount(taken);
-            player.getInventory().addItem(toGive);
-            AuditLogger.log("container-withdraw", player, ownerId.toString(), "amount=" + taken + " item=" + getItemName(toGive));
+            int returned = 0;
+            for (ItemStack leftover : player.getInventory().addItem(toGive).values()) {
+                if (leftover == null || leftover.getType().isAir() || leftover.getAmount() <= 0) continue;
+                returned += leftover.getAmount();
+                manager.restoreItemToContainer(ownerId, leftover);
+            }
+            int delivered = taken - returned;
+            if (delivered <= 0) {
+                queueRefresh(ownerId);
+                return;
+            }
+            toGive.setAmount(delivered);
+            AuditLogger.log("container-withdraw", player, ownerId.toString(), "amount=" + delivered + " item=" + getItemName(toGive));
 
             boolean withdrawMessages = plugin.getConfig().getBoolean("container-options.messages.withdraw", true);
             if (withdrawMessages) {
-                sendItemMessage(player, "container.take", "{prefix} You took {amount} of {item} out of the container.", taken, getItemName(toGive), ownerName);
+                sendItemMessage(player, "container.take", "{prefix} You took {amount} of {item} out of the container.", delivered, getItemName(toGive), ownerName);
             }
 
             queueRefresh(ownerId);
@@ -710,24 +725,24 @@ public class ContainerGUI {
             return new ArrayList<>(cached.entries());
         }
 
-        List<DisplayEntry> built = buildDisplayEntries(manager.getItemView(ownerId), compactDisplay);
+        List<DisplayEntry> built = buildDisplayEntries(manager.getItemView(ownerId), compactDisplay, version);
         DISPLAY_CACHE.put(ownerId, new CachedDisplayEntries(version, compactDisplay, List.copyOf(built)));
         return new ArrayList<>(built);
     }
 
-    private static List<DisplayEntry> buildDisplayEntries(List<ItemStack> source, boolean compactDisplay) {
+    private static List<DisplayEntry> buildDisplayEntries(List<ItemStack> source, boolean compactDisplay, long containerVersion) {
         if (!compactDisplay) {
             List<DisplayEntry> entries = new ArrayList<>();
             for (ItemStack item : source) {
                 ItemStack snapshot = item.clone();
-                entries.add(new DisplayEntry(snapshot, snapshot.getAmount(), resolveSortName(snapshot)));
+                entries.add(new DisplayEntry(snapshot, snapshot.getAmount(), resolveSortName(snapshot), containerVersion));
             }
             return entries;
         }
 
         List<DisplayEntry> entries = new ArrayList<>();
         for (AggregatedItem entry : ItemAggregationService.aggregate(source)) {
-            entries.add(new DisplayEntry(entry.template(), entry.amount(), entry.searchName()));
+            entries.add(new DisplayEntry(entry.template(), entry.amount(), entry.searchName(), containerVersion));
         }
         return entries;
     }
@@ -1545,7 +1560,7 @@ public class ContainerGUI {
         }
     }
 
-    private record DisplayEntry(ItemStack item, int amount, String sortName) {
+    private record DisplayEntry(ItemStack item, int amount, String sortName, long containerVersion) {
     }
 
     private record ViewRenderState(int page, int maxPage) {
