@@ -15,9 +15,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class AuditLogger {
     private static final Queue<String> QUEUE = new ConcurrentLinkedQueue<>();
+    private static final AtomicInteger QUEUED_LINES = new AtomicInteger();
+    private static final AtomicLong DROPPED_LINES = new AtomicLong();
     private static BukkitTask flushTask;
 
     private AuditLogger() {
@@ -38,6 +42,15 @@ public final class AuditLogger {
                 + " detail=" + sanitize(detail)
                 + System.lineSeparator();
 
+        int maxQueuedLines = Math.max(1, plugin.getConfig().getInt("audit.max-queued-lines", 8192));
+        while (true) {
+            int queued = QUEUED_LINES.get();
+            if (queued >= maxQueuedLines) {
+                DROPPED_LINES.incrementAndGet();
+                return;
+            }
+            if (QUEUED_LINES.compareAndSet(queued, queued + 1)) break;
+        }
         QUEUE.add(line);
         ensureTask(plugin);
     }
@@ -47,15 +60,22 @@ public final class AuditLogger {
     }
 
     public static void shutdown() {
+        shutdown(true);
+    }
+
+    /** Runtime plugin unloaders must not turn queued audit file I/O into a server-thread stall. */
+    public static void shutdown(boolean flush) {
         VContainer plugin = VContainer.getInstance();
         if (flushTask != null) {
             flushTask.cancel();
             flushTask = null;
         }
-        if (plugin != null) {
+        if (flush && plugin != null) {
             flushAll(plugin);
         }
         QUEUE.clear();
+        QUEUED_LINES.set(0);
+        DROPPED_LINES.set(0);
     }
 
     private static void ensureTask(VContainer plugin) {
@@ -70,6 +90,7 @@ public final class AuditLogger {
         for (int i = 0; i < max; i++) {
             String line = QUEUE.poll();
             if (line == null) break;
+            QUEUED_LINES.decrementAndGet();
             lines.add(line);
         }
         if (lines.isEmpty()) return;
@@ -81,6 +102,10 @@ public final class AuditLogger {
             Files.writeString(file.toPath(), String.join("", lines), StandardCharsets.UTF_8,
                     java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.APPEND);
+            long dropped = DROPPED_LINES.getAndSet(0L);
+            if (dropped > 0L) {
+                plugin.getLogger().warning("Audit queue reached its limit; dropped " + dropped + " audit line(s).");
+            }
         } catch (IOException e) {
             plugin.getLogger().warning("Failed to write audit log: " + e.getMessage());
         }

@@ -269,10 +269,6 @@ final class ContainerDialogGUI {
             default -> 0;
         };
         if (amount <= 0) return;
-        if (amount >= sellService.bulkSaleThreshold()) {
-            sellService.startBulkSell(player, state.manager, state.ownerId, target, amount, ignored -> show(player, state));
-            return;
-        }
         sellService.sell(player, state.manager, state.ownerId, target, amount);
     }
 

@@ -50,6 +50,10 @@ public final class VortexMinionsHookListener implements Listener {
             event.setCancelled(true);
             return;
         }
+        if (!containerManager.isContainerLoaded(storageBlock.ownerId())) {
+            event.setCancelled(true);
+            return;
+        }
 
         Minion minion = event.getMinion();
         if (minion == null || !canLink(minion, storageBlock)) {

@@ -160,9 +160,13 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                     return true;
                 }
 
-                OfflinePlayer target = offlinePlayer(args[1]);
-                if (target == null || (!target.hasPlayedBefore() && !target.isOnline())) {
-                    sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.player-not-found", "{prefix} The specific player not found! &8(&7{player}&8)").replace("{player}", args[1])));
+                Player target = Bukkit.getPlayerExact(args[1]);
+                if (target == null || !target.isOnline()) {
+                    sender.sendMessage(plugin.formatMessage("{prefix} The player must be online to access their container."));
+                    return true;
+                }
+                if (!manager.isContainerLoaded(target.getUniqueId())) {
+                    sender.sendMessage(plugin.formatMessage("{prefix} This player's container is still loading or unavailable."));
                     return true;
                 }
 
@@ -174,7 +178,7 @@ public class ContainerAdminCommand implements CommandExecutor, TabCompleter {
                         return true;
                     }
                     Player admin = (Player) sender;
-                    String ownerName = target.getName() != null ? target.getName() : args[1];
+                    String ownerName = target.getName();
                     ContainerGUI.openContainerForAdmin(admin, target.getUniqueId(), ownerName, manager, 1);
                     sender.sendMessage(plugin.formatMessage(plugin.getMessageConfig().getString("admin-command.open", "{prefix} You opened {player}'s container!").replace("{player}", ownerName)));
                 } else {

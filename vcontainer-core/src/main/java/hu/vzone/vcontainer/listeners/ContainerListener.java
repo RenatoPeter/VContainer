@@ -179,6 +179,7 @@ public class ContainerListener implements Listener {
         SkinProvider.cache(event.getPlayer());
         VContainer plugin = VContainer.getInstance();
         if (plugin == null) return;
+        manager.loadPlayer(event.getPlayer());
         if (!plugin.getConfig().getBoolean("update-checker.enabled", true)) return;
         if (!event.getPlayer().isOp()) return;
         if (!plugin.getUpdateChecker().wasChecked() || !plugin.getUpdateChecker().isUpdateAvailable()) return;

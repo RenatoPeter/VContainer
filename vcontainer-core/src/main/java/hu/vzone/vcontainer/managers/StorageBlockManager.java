@@ -31,6 +31,7 @@ import org.bukkit.entity.Player;
 import org.bukkit.entity.TextDisplay;
 import org.bukkit.inventory.Inventory;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.io.File;
@@ -82,12 +83,17 @@ public class StorageBlockManager {
     private final Map<UUID, DirtyBlockSave> dirtyBlockSaves = new HashMap<>();
     private final Map<UUID, DirtyBlockDelete> dirtyBlockDeletes = new HashMap<>();
     private final Object blockSaveLock = new Object();
+    private final Object blockFlushStateLock = new Object();
     private long blockMutationVersion;
+    private boolean blockFlushInProgress;
+    private volatile boolean blockPersistenceShuttingDown;
     private BukkitTask hopperTask;
     private BukkitTask autoSaveTask;
     private BukkitTask hologramRefreshTask;
     private int hopperCursor;
     private volatile boolean persistenceSuspended;
+    private volatile boolean blockStartupLoadFailed;
+    private volatile boolean blockStartupLoading;
 
     public StorageBlockManager(VContainer plugin, ContainerManager containerManager) {
         this.plugin = plugin;
@@ -100,13 +106,18 @@ public class StorageBlockManager {
         File storageDirectory = plugin.getStorageFolder();
         this.globalDirectory = new File(storageDirectory, "global_storage_blocks");
         this.personalDirectory = new File(storageDirectory, "personal_storage_blocks");
-        if (!localStorage) initSqlStorage();
-        load();
+        if (localStorage) {
+            load();
+        } else {
+            initSqlStorage();
+            loadSqlBlocksAsync();
+        }
         startAutoSaveTask();
         startHopperTask();
     }
 
     public boolean add(Block block) {
+        if (blockStartupLoading || blockStartupLoadFailed) return false;
         String key = key(block.getLocation());
         if (globalBlocks.containsKey(key) || personalBlocks.containsKey(key)) return false;
 
@@ -118,6 +129,7 @@ public class StorageBlockManager {
     }
 
     public boolean addPersonal(Block block, Player owner) {
+        if (blockStartupLoading || blockStartupLoadFailed) return false;
         String key = key(block.getLocation());
         if (globalBlocks.containsKey(key) || personalBlocks.containsKey(key)) return false;
 
@@ -449,17 +461,34 @@ public class StorageBlockManager {
     }
 
     public void shutdown() {
+        shutdown(false);
+    }
+
+    /** Runtime unload must never wait for a JDBC response on the server thread. */
+    public void shutdownWithoutBlockingFlush() {
+        shutdown(false);
+    }
+
+    private void shutdown(boolean flush) {
         if (hopperTask != null) hopperTask.cancel();
         if (autoSaveTask != null) autoSaveTask.cancel();
         if (hologramRefreshTask != null) hologramRefreshTask.cancel();
-        if (!persistenceSuspended) flushDirtyBlocksSync();
+        blockPersistenceShuttingDown = true;
+        if (flush) {
+            awaitBlockFlush();
+            if (!persistenceSuspended) flushDirtyBlocksSync(true);
+        }
         removeAllHolograms();
-        if (sqlDataSource != null) sqlDataSource.close();
+        closeSqlDataSource();
     }
 
     public void flushSync() {
         if (persistenceSuspended) return;
-        flushDirtyBlocksSync();
+        if (Bukkit.isPrimaryThread()) {
+            Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> flushDirtyBlocksSync(false));
+            return;
+        }
+        flushDirtyBlocksSync(false);
     }
 
     public void setPersistenceSuspended(boolean suspended) {
@@ -483,13 +512,42 @@ public class StorageBlockManager {
     }
 
     private void load() {
-        if (localStorage) {
-            ensureStorageDirectories();
-            loadJsonBlocks(globalDirectory, StorageType.GLOBAL);
-            loadJsonBlocks(personalDirectory, StorageType.PERSONAL);
-        } else {
-            loadSqlBlocks();
+        ensureStorageDirectories();
+        loadJsonBlocks(globalDirectory, StorageType.GLOBAL);
+        loadJsonBlocks(personalDirectory, StorageType.PERSONAL);
+        finishStartupLoad();
+    }
+
+    /** Performs SQL startup I/O away from the server thread, then publishes Bukkit state synchronously. */
+    private void loadSqlBlocksAsync() {
+        blockStartupLoading = true;
+        Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
+            SqlBlockLoad result = readSqlBlocks();
+            try {
+                Bukkit.getScheduler().runTask(plugin, () -> publishSqlBlocks(result));
+            } catch (IllegalPluginAccessException ignored) {
+                // Plugin was disabled while the initial query was in flight.
+            }
+        });
+    }
+
+    private void publishSqlBlocks(SqlBlockLoad result) {
+        blockStartupLoading = false;
+        if (!result.successful()) {
+            blockStartupLoadFailed = true;
+            persistenceSuspended = true;
+            plugin.getLogger().severe("Storage block SQL startup load failed. Block persistence is disabled to protect existing data.");
+            return;
         }
+        globalBlocks.putAll(result.globalBlocks());
+        for (StorageBlock storageBlock : result.personalBlocks().values()) {
+            personalBlocks.put(storageBlock.key(), storageBlock);
+            registerPersonalBlock(storageBlock);
+        }
+        finishStartupLoad();
+    }
+
+    private void finishStartupLoad() {
         loadLegacyIfPresent();
         loadGlobal();
         loadPersonal();
@@ -584,6 +642,10 @@ public class StorageBlockManager {
         config.setJdbcUrl(storageSettings.buildJdbcUrl(plugin.getDataFolder()));
         config.setMaximumPoolSize(storageSettings.poolSize());
         config.setPoolName("VContainer-Blocks-" + storageSettings.type().name());
+        config.setConnectionTimeout(5_000L);
+        config.setValidationTimeout(3_000L);
+        config.setKeepaliveTime(60_000L);
+        config.setInitializationFailTimeout(-1L);
 
         String driverClass = storageSettings.resolvedDriverClass();
         if (!driverClass.isBlank()) config.setDriverClassName(driverClass);
@@ -618,43 +680,34 @@ public class StorageBlockManager {
         }
     }
 
-    private void loadSqlBlocks() {
-        loadSqlGlobalBlocks();
-        loadSqlPersonalBlocks();
-    }
-
-    private void loadSqlGlobalBlocks() {
-        String sql = "SELECT id, location_key FROM " + globalTable;
-        try (Connection connection = sqlDataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql);
-             ResultSet result = statement.executeQuery()) {
-            while (result.next()) {
-                UUID id = UUID.fromString(result.getString("id"));
-                String key = result.getString("location_key");
-                globalBlocks.put(key, StorageBlock.global(id, key));
+    private SqlBlockLoad readSqlBlocks() {
+        Map<String, StorageBlock> loadedGlobal = new HashMap<>();
+        Map<String, StorageBlock> loadedPersonal = new HashMap<>();
+        try {
+            createSqlTables();
+            try (Connection connection = sqlDataSource.getConnection();
+                 PreparedStatement global = connection.prepareStatement("SELECT id, location_key FROM " + globalTable);
+                 PreparedStatement personal = connection.prepareStatement("SELECT id, location_key, owner_uuid, owner_name, members FROM " + personalTable);
+                 ResultSet globalRows = global.executeQuery();
+                 ResultSet personalRows = personal.executeQuery()) {
+                while (globalRows.next()) {
+                    UUID id = UUID.fromString(globalRows.getString("id"));
+                    String key = globalRows.getString("location_key");
+                    loadedGlobal.put(key, StorageBlock.global(id, key));
+                }
+                while (personalRows.next()) {
+                    UUID id = UUID.fromString(personalRows.getString("id"));
+                    String key = personalRows.getString("location_key");
+                    UUID ownerId = UUID.fromString(personalRows.getString("owner_uuid"));
+                    String ownerName = personalRows.getString("owner_name");
+                    Set<UUID> members = parseMembers(personalRows.getString("members"));
+                    loadedPersonal.put(key, new StorageBlock(id, key, StorageType.PERSONAL, ownerId, ownerName, members));
+                }
             }
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load SQL global storage blocks: " + e.getMessage());
-        }
-    }
-
-    private void loadSqlPersonalBlocks() {
-        String sql = "SELECT id, location_key, owner_uuid, owner_name, members FROM " + personalTable;
-        try (Connection connection = sqlDataSource.getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql);
-             ResultSet result = statement.executeQuery()) {
-            while (result.next()) {
-                UUID id = UUID.fromString(result.getString("id"));
-                String key = result.getString("location_key");
-                UUID ownerId = UUID.fromString(result.getString("owner_uuid"));
-                String ownerName = result.getString("owner_name");
-                Set<UUID> members = parseMembers(result.getString("members"));
-                StorageBlock storageBlock = new StorageBlock(id, key, StorageType.PERSONAL, ownerId, ownerName, members);
-                personalBlocks.put(key, storageBlock);
-                registerPersonalBlock(storageBlock);
-            }
-        } catch (Exception e) {
-            plugin.getLogger().severe("Failed to load SQL personal storage blocks: " + e.getMessage());
+            return SqlBlockLoad.success(loadedGlobal, loadedPersonal);
+        } catch (Exception exception) {
+            plugin.getLogger().severe("Failed to load SQL storage blocks: " + exception.getMessage());
+            return SqlBlockLoad.failure();
         }
     }
 
@@ -715,8 +768,10 @@ public class StorageBlockManager {
         }
     }
 
-    private void flushDirtyBlocksSync() {
-        if (persistenceSuspended) return;
+    private void flushDirtyBlocksSync(boolean allowShutdown) {
+        if (persistenceSuspended || blockStartupLoadFailed) return;
+        if (!beginBlockFlush(allowShutdown)) return;
+        try {
         Map<UUID, DirtyBlockSave> saves;
         Map<UUID, DirtyBlockDelete> deletes;
         synchronized (blockSaveLock) {
@@ -735,6 +790,43 @@ public class StorageBlockManager {
                 markBlockSaveSaved(entry.getKey(), entry.getValue().version());
             }
         }
+        } finally {
+            endBlockFlush();
+        }
+    }
+
+    private boolean beginBlockFlush(boolean allowShutdown) {
+        synchronized (blockFlushStateLock) {
+            if (blockFlushInProgress || (blockPersistenceShuttingDown && !allowShutdown)) return false;
+            blockFlushInProgress = true;
+            return true;
+        }
+    }
+
+    private void endBlockFlush() {
+        synchronized (blockFlushStateLock) {
+            blockFlushInProgress = false;
+            blockFlushStateLock.notifyAll();
+        }
+    }
+
+    private void awaitBlockFlush() {
+        synchronized (blockFlushStateLock) {
+            while (blockFlushInProgress) {
+                try {
+                    blockFlushStateLock.wait();
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
+        }
+    }
+
+    private synchronized void closeSqlDataSource() {
+        HikariDataSource dataSource = sqlDataSource;
+        sqlDataSource = null;
+        if (dataSource != null) dataSource.close();
     }
 
     private void markBlockSaveSaved(UUID id, long savedVersion) {
@@ -928,7 +1020,7 @@ public class StorageBlockManager {
     private void startAutoSaveTask() {
         autoSaveTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
                 plugin,
-                this::flushDirtyBlocksSync,
+                () -> flushDirtyBlocksSync(false),
                 AUTO_SAVE_TICKS,
                 AUTO_SAVE_TICKS
         );
@@ -1237,6 +1329,18 @@ public class StorageBlockManager {
     }
 
     private record DirtyBlockDelete(StorageType type, long version) {
+    }
+
+    private record SqlBlockLoad(boolean successful, Map<String, StorageBlock> globalBlocks,
+                                Map<String, StorageBlock> personalBlocks) {
+        private static SqlBlockLoad success(Map<String, StorageBlock> globalBlocks,
+                                            Map<String, StorageBlock> personalBlocks) {
+            return new SqlBlockLoad(true, globalBlocks, personalBlocks);
+        }
+
+        private static SqlBlockLoad failure() {
+            return new SqlBlockLoad(false, Collections.emptyMap(), Collections.emptyMap());
+        }
     }
 
     private record HopperLinks(List<String> inputHopperKeys, String outputHopperKey) {

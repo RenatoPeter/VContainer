@@ -7,66 +7,69 @@ import hu.vzone.vcontainer.api.events.ContainerWithdrawItemEvent;
 import hu.vzone.vcontainer.storage.ContainerStorage;
 import hu.vzone.vcontainer.storage.LocalContainerStorage;
 import hu.vzone.vcontainer.storage.SqlContainerStorage;
+import hu.vzone.vcontainer.storage.PlayerContainerLoadResult;
 import hu.vzone.vcontainer.storage.StorageSettings;
 import hu.vzone.vcontainer.utils.ItemUtils;
+import hu.vzone.vcontainer.utils.ContainerDebugLogger;
 import hu.vzone.vcontainer.utils.StoragePolicy;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
+import org.bukkit.plugin.IllegalPluginAccessException;
 import org.bukkit.scheduler.BukkitTask;
 
 import java.util.ArrayList;
-import java.util.ArrayDeque;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 
 public class ContainerManager {
     private static final long AUTO_SAVE_TICKS = 20L * 60L * 2L;
     private static final int UNLIMITED_STACK_SIZE = Integer.MAX_VALUE;
-    private static final int STACK_COMPACTION_ITEMS_PER_TICK = 128;
 
     private final VContainer plugin;
     private final ContainerStorage storage;
     private final Map<UUID, List<ItemStack>> cache = new HashMap<>();
+    private final Map<UUID, ContainerState> containerStates = new HashMap<>();
+    private final Map<UUID, Long> sessions = new HashMap<>();
     private final Map<UUID, Long> dirtyVersions = new HashMap<>();
+    private final Map<UUID, Long> inFlightVersions = new HashMap<>();
     private final Map<UUID, Long> containerVersions = new HashMap<>();
     private final Set<UUID> bulkOperationOwners = new HashSet<>();
-    private final Object saveLock = new Object();
-    private final CountDownLatch initialLoadFinished = new CountDownLatch(1);
+    private final Object flushStateLock = new Object();
+    private final ExecutorService persistenceExecutor;
+    private final hu.vzone.vcontainer.storage.ContainerRecoveryJournal recoveryJournal;
     private long mutationVersion;
+    private long sessionCounter;
+    private boolean flushInProgress;
     private BukkitTask autoSaveTask;
-    private BukkitTask initialLoadTask;
-    private BukkitTask stackCompactionTask;
-    private final ArrayDeque<UUID> stackCompactionQueue = new ArrayDeque<>();
-    private StackCompactionState stackCompactionState;
     private volatile boolean persistenceSuspended;
     private volatile boolean stackEnabled;
     private volatile int configuredMaxStack;
-    private volatile boolean initialLoadComplete;
-    private volatile boolean shuttingDown;
-    private volatile boolean closeStorageAfterInitialLoad;
-    private volatile Map<UUID, List<ItemStack>> pendingInitialLoad = Collections.emptyMap();
+    private volatile boolean running = true;
     private boolean storageClosed;
 
     public ContainerManager(VContainer plugin) {
         this.plugin = plugin;
         this.storage = createStorage(plugin);
+        this.persistenceExecutor = Executors.newFixedThreadPool(2, persistenceThreadFactory());
+        this.recoveryJournal = new hu.vzone.vcontainer.storage.ContainerRecoveryJournal(plugin);
         reloadRuntimeSettings();
-        this.autoSaveTask = Bukkit.getScheduler().runTaskTimerAsynchronously(
+        this.autoSaveTask = Bukkit.getScheduler().runTaskTimer(
                 plugin,
-                this::flushDirtySync,
+                this::startAutosave,
                 AUTO_SAVE_TICKS,
                 AUTO_SAVE_TICKS
         );
-        startInitialLoad();
     }
 
     public int addItemToContainer(Player player, ItemStack item) {
@@ -75,7 +78,7 @@ public class ContainerManager {
 
     public int addItemToContainer(UUID ownerId, Player actor, ItemStack item) {
         if (item == null || item.getType().isAir() || item.getAmount() <= 0) return 0;
-        if (!initialLoadComplete) return 0;
+        if (!canMutate(ownerId)) return 0;
 
         ContainerAddItemEvent event = new ContainerAddItemEvent(actor, item);
         Bukkit.getPluginManager().callEvent(event);
@@ -86,10 +89,11 @@ public class ContainerManager {
 
     public synchronized int addItemToContainer(UUID ownerId, ItemStack item) {
         if (item == null || item.getType().isAir() || item.getAmount() <= 0) return 0;
-        if (!initialLoadComplete) return 0;
+        if (!canMutate(ownerId)) return 0;
         if (bulkOperationOwners.contains(ownerId)) return 0;
 
-        List<ItemStack> list = getOrCreate(ownerId);
+        List<ItemStack> list = readyItems(ownerId);
+        if (list == null) return 0;
         StoragePolicy.Result policy = StoragePolicy.canAdd(plugin, list, item);
         if (!policy.allowed()) {
             plugin.getLogger().fine("Blocked container item add for " + ownerId + ": " + policy.reason());
@@ -104,19 +108,10 @@ public class ContainerManager {
             org.bukkit.inventory.meta.ItemMeta targetMeta = targetHasMeta ? item.getItemMeta() : null;
             ItemStack primaryStack = null;
 
-            for (Iterator<ItemStack> iterator = list.iterator(); iterator.hasNext();) {
-                ItemStack current = iterator.next();
+            for (ItemStack current : list) {
                 if (ItemUtils.isSameItemWithNBT(current, item, targetHasMeta, targetMeta)) {
                     if (primaryStack == null) {
                         primaryStack = current;
-                    } else if (configuredMaxStack == UNLIMITED_STACK_SIZE) {
-                        // Unlimited storage has one canonical entry per equal item, including old entries.
-                        int moved = Math.min(current.getAmount(), UNLIMITED_STACK_SIZE - primaryStack.getAmount());
-                        if (moved > 0) {
-                            primaryStack.setAmount(primaryStack.getAmount() + moved);
-                            current.setAmount(current.getAmount() - moved);
-                        }
-                        if (current.getAmount() <= 0) iterator.remove();
                     }
                 }
             }
@@ -162,6 +157,61 @@ public class ContainerManager {
     }
 
     /**
+     * Atomically removes the requested amount from the in-memory container only when all of it is
+     * available. It rebuilds the backing ArrayList once instead of shifting it for every removed stack.
+     */
+    public int takeExactItemFromContainer(UUID ownerId, ItemStack target, int amount) {
+        if (target == null || target.getType().isAir() || amount <= 0 || !canMutate(ownerId)) return 0;
+        synchronized (this) {
+            if (bulkOperationOwners.contains(ownerId)) return 0;
+        }
+
+        ContainerWithdrawItemEvent event = new ContainerWithdrawItemEvent(ownerId, target, amount);
+        Bukkit.getPluginManager().callEvent(event);
+        if (event.isCancelled()) return 0;
+
+        return takeExactItemFromContainerLocked(ownerId, target, amount);
+    }
+
+    private synchronized int takeExactItemFromContainerLocked(UUID ownerId, ItemStack target, int amount) {
+        List<ItemStack> list = readyItems(ownerId);
+        if (list == null) return 0;
+        boolean targetHasMeta = target.hasItemMeta();
+        org.bukkit.inventory.meta.ItemMeta targetMeta = targetHasMeta ? target.getItemMeta() : null;
+
+        long available = 0L;
+        for (ItemStack current : list) {
+            if (current == null || !ItemUtils.isSameItemWithNBT(current, target, targetHasMeta, targetMeta)) continue;
+            available += current.getAmount();
+            if (available >= amount) break;
+        }
+        if (available < amount) return 0;
+
+        int remaining = amount;
+        List<ItemStack> retained = new ArrayList<>(list.size());
+        for (ItemStack current : list) {
+            if (current == null || remaining <= 0
+                    || !ItemUtils.isSameItemWithNBT(current, target, targetHasMeta, targetMeta)) {
+                retained.add(current);
+                continue;
+            }
+
+            int remove = Math.min(current.getAmount(), remaining);
+            remaining -= remove;
+            int stackRemaining = current.getAmount() - remove;
+            if (stackRemaining > 0) {
+                current.setAmount(stackRemaining);
+                retained.add(current);
+            }
+        }
+
+        list.clear();
+        list.addAll(retained);
+        markDirty(ownerId);
+        return amount;
+    }
+
+    /**
      * Removes an item only when the caller is still looking at the supplied container version.
      * This protects the inventory GUI from stale click packets after another viewer changed it.
      */
@@ -171,7 +221,7 @@ public class ContainerManager {
 
     private int takeItemFromContainer(UUID ownerId, ItemStack target, int amount, long expectedVersion, boolean requireExactItem) {
         if (target == null || target.getType().isAir() || amount <= 0) return 0;
-        if (!initialLoadComplete) return 0;
+        if (!canMutate(ownerId)) return 0;
         synchronized (this) {
             if (bulkOperationOwners.contains(ownerId)) return 0;
         }
@@ -187,7 +237,8 @@ public class ContainerManager {
         if (expectedVersion >= 0L && containerVersions.getOrDefault(ownerId, 0L) != expectedVersion) {
             return 0;
         }
-        List<ItemStack> list = getOrCreate(ownerId);
+        List<ItemStack> list = readyItems(ownerId);
+        if (list == null) return 0;
         int remaining = amount;
         boolean targetHasMeta = target.hasItemMeta();
         org.bukkit.inventory.meta.ItemMeta targetMeta = targetHasMeta ? target.getItemMeta() : null;
@@ -214,8 +265,10 @@ public class ContainerManager {
 
     /** Restores a withdrawal that could not be delivered to a player's inventory. */
     public synchronized void restoreItemToContainer(UUID ownerId, ItemStack item) {
-        if (item == null || item.getType().isAir() || item.getAmount() <= 0 || !initialLoadComplete) return;
-        getOrCreate(ownerId).add(item.clone());
+        if (item == null || item.getType().isAir() || item.getAmount() <= 0 || !canMutate(ownerId)) return;
+        List<ItemStack> list = readyItems(ownerId);
+        if (list == null) return;
+        list.add(item.clone());
         markDirty(ownerId);
     }
 
@@ -224,18 +277,19 @@ public class ContainerManager {
     }
 
     public synchronized List<ItemStack> getAllItemFromContainer(UUID ownerId) {
-        if (!initialLoadComplete) return Collections.emptyList();
-        return Collections.unmodifiableList(cloneItems(getOrCreate(ownerId)));
+        List<ItemStack> items = readyItems(ownerId);
+        return items == null ? Collections.emptyList() : Collections.unmodifiableList(cloneItems(items));
     }
 
     public synchronized List<ItemStack> getItemView(UUID ownerId) {
-        if (!initialLoadComplete) return Collections.emptyList();
-        return Collections.unmodifiableList(new ArrayList<>(getOrCreate(ownerId)));
+        List<ItemStack> items = readyItems(ownerId);
+        return items == null ? Collections.emptyList() : Collections.unmodifiableList(new ArrayList<>(items));
     }
 
     public synchronized ItemStack peekFirstItem(UUID ownerId) {
-        if (!initialLoadComplete) return null;
-        for (ItemStack item : getOrCreate(ownerId)) {
+        List<ItemStack> items = readyItems(ownerId);
+        if (items == null) return null;
+        for (ItemStack item : items) {
             if (item == null || item.getType().isAir() || item.getAmount() <= 0) continue;
             return item.clone();
         }
@@ -243,13 +297,12 @@ public class ContainerManager {
     }
 
     public synchronized Map<UUID, List<ItemStack>> snapshotContainers() {
-        if (!initialLoadComplete) return Collections.emptyMap();
         return cloneContainers(cache);
     }
 
     public synchronized boolean itemInContainer(Player player, ItemStack item) {
-        if (!initialLoadComplete) return false;
-        List<ItemStack> list = getOrCreate(player.getUniqueId());
+        List<ItemStack> list = readyItems(player.getUniqueId());
+        if (list == null) return false;
         return list.stream().anyMatch(s -> ItemUtils.isSameItemWithNBT(s, item));
     }
 
@@ -258,7 +311,7 @@ public class ContainerManager {
     }
 
     public synchronized void clearContainer(UUID ownerId) {
-        if (!initialLoadComplete) return;
+        if (!canMutate(ownerId)) return;
         if (bulkOperationOwners.contains(ownerId)) return;
         cache.put(ownerId, new ArrayList<>());
         markDirty(ownerId);
@@ -269,7 +322,7 @@ public class ContainerManager {
      * on the server thread until it completes, then commit or roll it back.
      */
     public synchronized BatchTakeOperation beginBatchTake(UUID ownerId, ItemStack target, int amount) {
-        if (!initialLoadComplete || ownerId == null || target == null || target.getType().isAir() || amount <= 0 || bulkOperationOwners.contains(ownerId)) {
+        if (!canMutate(ownerId) || ownerId == null || target == null || target.getType().isAir() || amount <= 0 || bulkOperationOwners.contains(ownerId)) {
             return null;
         }
 
@@ -290,20 +343,21 @@ public class ContainerManager {
     }
 
     /**
-     * Removes at most {@code maxStacks} storage stacks. This keeps bulk sales below a predictable
-     * per-tick work limit while the owner is locked against conflicting mutations.
+     * Plans removal from at most {@code maxStacks} storage stacks. The list itself remains untouched
+     * until commit, avoiding repeated ArrayList shifts for large legacy containers.
      */
     public synchronized BatchTakeProgress processBatchTake(BatchTakeOperation operation, int maxStacks) {
         if (!isActiveBatchOperation(operation) || maxStacks <= 0) {
             return BatchTakeProgress.invalid();
         }
 
-        List<ItemStack> list = getOrCreate(operation.ownerId);
+        List<ItemStack> list = readyItems(operation.ownerId);
+        if (list == null) return BatchTakeProgress.invalid();
         int scanned = 0;
         while (operation.cursor < list.size() && operation.remaining > 0 && scanned < maxStacks) {
             ItemStack current = list.get(operation.cursor);
             scanned++;
-            if (!ItemUtils.isSameItemWithNBT(current, operation.target, operation.targetHasMeta, operation.targetMeta)) {
+            if (current == null || !ItemUtils.isSameItemWithNBT(current, operation.target, operation.targetHasMeta, operation.targetMeta)) {
                 operation.cursor++;
                 continue;
             }
@@ -311,16 +365,8 @@ public class ContainerManager {
             int removed = Math.min(current.getAmount(), operation.remaining);
             operation.remaining -= removed;
             operation.removed += removed;
-            if (removed == current.getAmount()) {
-                list.remove(operation.cursor);
-                operation.removedStacks.add(current);
-            } else {
-                ItemStack removedStack = current.clone();
-                removedStack.setAmount(removed);
-                operation.removedStacks.add(removedStack);
-                current.setAmount(current.getAmount() - removed);
-                operation.cursor++;
-            }
+            operation.removals.merge(current, removed, Integer::sum);
+            operation.cursor++;
         }
 
         if (operation.remaining <= 0 || operation.cursor >= list.size()) {
@@ -331,22 +377,40 @@ public class ContainerManager {
 
     /** Commits an entirely completed operation and makes it eligible for persistence. */
     public synchronized boolean commitBatchTake(BatchTakeOperation operation) {
-        if (!isActiveBatchOperation(operation) || !operation.complete || operation.remaining != 0) {
+        if (operation == null || !canMutate(operation.ownerId) || !isActiveBatchOperation(operation) || !operation.complete || operation.remaining != 0) {
             return false;
         }
 
+        List<ItemStack> list = readyItems(operation.ownerId);
+        if (list == null) return false;
+        List<ItemStack> retained = new ArrayList<>(list.size());
+        for (ItemStack current : list) {
+            int remove = operation.removals.getOrDefault(current, 0);
+            if (remove <= 0) {
+                retained.add(current);
+                continue;
+            }
+
+            int remaining = current.getAmount() - remove;
+            if (remaining > 0) {
+                current.setAmount(remaining);
+                retained.add(current);
+            }
+        }
+        // Replacing the contents once is O(n); iterator removal here would be O(n^2).
+        list.clear();
+        list.addAll(retained);
         markDirty(operation.ownerId);
         finishBatchOperation(operation);
-        operation.removedStacks.clear();
+        operation.removals.clear();
         return true;
     }
 
-    /** Restores all removed stacks without invoking storage policies or NBT comparisons. */
+    /** The storage list is unchanged before commit, so rollback only releases the owner lock. */
     public synchronized void rollbackBatchTake(BatchTakeOperation operation) {
         if (!isActiveBatchOperation(operation)) return;
 
-        getOrCreate(operation.ownerId).addAll(operation.removedStacks);
-        operation.removedStacks.clear();
+        operation.removals.clear();
         finishBatchOperation(operation);
     }
 
@@ -355,31 +419,89 @@ public class ContainerManager {
     }
 
     public void clearCacheFor(UUID playerId) {
-        // Containers are loaded once and kept in memory so delayed saves cannot lose dirty data.
+        unloadPlayer(playerId);
+    }
+
+    /** Starts the owner-scoped asynchronous load for a joining player. */
+    public void loadPlayer(Player player) {
+        if (player == null || !player.isOnline() || !running) return;
+        UUID ownerId = player.getUniqueId();
+        long session;
+        synchronized (this) {
+            ContainerState current = containerStates.get(ownerId);
+            if (current == ContainerState.READY || current == ContainerState.LOADING) return;
+            if (current == ContainerState.UNLOADING) {
+                containerStates.put(ownerId, ContainerState.READY);
+                sessions.put(ownerId, nextSession(ownerId));
+                return;
+            }
+            containerStates.put(ownerId, ContainerState.LOADING);
+            session = nextSession(ownerId);
+        }
+
+        persistenceExecutor.execute(() -> loadPlayerAsync(ownerId, session));
+    }
+
+    /** Loads already-online players after a runtime plugin reload without scanning the whole database. */
+    public void loadOnlinePlayers() {
+        for (Player player : Bukkit.getOnlinePlayers()) loadPlayer(player);
+    }
+
+    /** Final player save is asynchronous; an unsaved failure remains in UNLOADING cache for retry/rejoin. */
+    public void unloadPlayer(UUID ownerId) {
+        if (ownerId == null) return;
+        DirtyContainerSnapshot snapshot = null;
+        long session;
+        synchronized (this) {
+            ContainerState state = containerStates.get(ownerId);
+            if (state == null) return;
+            if (state == ContainerState.LOADING) {
+                containerStates.remove(ownerId);
+                // Removing the generation invalidates the in-flight load without retaining an offline UUID.
+                sessions.remove(ownerId);
+                return;
+            }
+            if (state != ContainerState.READY) return;
+            containerStates.put(ownerId, ContainerState.UNLOADING);
+            session = nextSession(ownerId);
+            Long version = dirtyVersions.get(ownerId);
+            if (version == null) {
+                evict(ownerId);
+                return;
+            }
+            if (version.equals(inFlightVersions.get(ownerId))) return;
+            snapshot = new DirtyContainerSnapshot(cloneItems(cache.getOrDefault(ownerId, Collections.emptyList())), version);
+        }
+        submitSingleSave(ownerId, session, snapshot);
     }
 
     public void flushAllSync() {
         if (autoSaveTask != null) autoSaveTask.cancel();
-        stopStackCompaction();
-        shuttingDown = true;
-        if (!initialLoadComplete && !awaitInitialLoad()) {
-            closeStorageAfterInitialLoad = true;
-            if (initialLoadFinished.getCount() == 0L) {
-                closeStorage();
+        running = false;
+        DirtyCacheSnapshot snapshot = dirtyCacheSnapshot();
+        for (Map.Entry<UUID, DirtyContainerSnapshot> entry : snapshot.containers().entrySet()) {
+            try {
+                recoveryJournal.write(entry.getKey(), entry.getValue().items());
+            } catch (java.io.IOException exception) {
+                plugin.getLogger().severe("Failed to write container recovery journal for " + entry.getKey() + ": " + exception.getMessage());
             }
-            plugin.getLogger().warning("Container startup load is still running; storage will close after it finishes.");
-            return;
         }
-        completeInitialLoad();
-        if (!persistenceSuspended) flushSync();
+        persistenceExecutor.shutdownNow();
         closeStorage();
     }
 
+    /** Runtime unload is journal-backed and never performs network I/O on the server thread. */
+    public void shutdownWithoutBlockingFlush() {
+        flushAllSync();
+    }
+
     public void flushSync() {
-        if (persistenceSuspended || !initialLoadComplete) return;
-        synchronized (saveLock) {
-            flushDirtySync();
-        }
+        flushSync(ContainerDebugLogger.SaveCause.MANUAL);
+    }
+
+    private void flushSync(ContainerDebugLogger.SaveCause cause) {
+        if (persistenceSuspended) return;
+        startAutosave();
     }
 
     public void setPersistenceSuspended(boolean suspended) {
@@ -402,150 +524,11 @@ public class ContainerManager {
         stackEnabled = plugin.getConfig().getBoolean("stack", true);
         int configured = plugin.getConfig().getInt("max-stack", -1);
         configuredMaxStack = configured <= 0 ? UNLIMITED_STACK_SIZE : Math.max(1, configured);
-        if (initialLoadComplete) {
-            scheduleStackCompaction();
-        }
     }
 
     /** True when stored stack amounts can exceed normal Minecraft inventory stack sizes. */
     public boolean usesUnlimitedStacks() {
         return stackEnabled && configuredMaxStack == UNLIMITED_STACK_SIZE;
-    }
-
-    public boolean isInitialLoadComplete() {
-        return initialLoadComplete;
-    }
-
-    private void startInitialLoad() {
-        initialLoadTask = Bukkit.getScheduler().runTaskAsynchronously(plugin, () -> {
-            Map<UUID, List<ItemStack>> loaded = Collections.emptyMap();
-            try {
-                loaded = storage.loadAll();
-            } catch (RuntimeException ex) {
-                plugin.getLogger().log(java.util.logging.Level.SEVERE, "Failed to load container data during startup.", ex);
-            } finally {
-                pendingInitialLoad = loaded == null ? Collections.emptyMap() : loaded;
-                initialLoadFinished.countDown();
-            }
-
-            if (shuttingDown) {
-                if (closeStorageAfterInitialLoad) {
-                    closeStorage();
-                }
-                return;
-            }
-            Bukkit.getScheduler().runTask(plugin, this::completeInitialLoad);
-        });
-    }
-
-    private synchronized void completeInitialLoad() {
-        if (initialLoadComplete || initialLoadFinished.getCount() != 0L) return;
-
-        cache.clear();
-        // The load task owns this map until now, so publishing it avoids recloning every stack on the server thread.
-        cache.putAll(pendingInitialLoad);
-        pendingInitialLoad = Collections.emptyMap();
-        initialLoadComplete = true;
-        scheduleStackCompaction();
-        plugin.getLogger().info("Loaded " + cache.size() + " cached container(s) from " + StorageSettings.from(plugin).type() + " storage.");
-    }
-
-    /** Gradually merges old matching entries after startup or config reload without a large single-tick scan. */
-    private synchronized void scheduleStackCompaction() {
-        if (!usesUnlimitedStacks() || shuttingDown) {
-            stopStackCompaction();
-            return;
-        }
-
-        stackCompactionQueue.clear();
-        stackCompactionQueue.addAll(cache.keySet());
-        stackCompactionState = null;
-        if (stackCompactionQueue.isEmpty()) return;
-        if (stackCompactionTask == null || stackCompactionTask.isCancelled()) {
-            stackCompactionTask = Bukkit.getScheduler().runTaskTimer(plugin, this::processStackCompaction, 1L, 1L);
-        }
-    }
-
-    private void processStackCompaction() {
-        synchronized (this) {
-            if (shuttingDown || !usesUnlimitedStacks()) {
-                stopStackCompaction();
-                return;
-            }
-
-            int remaining = STACK_COMPACTION_ITEMS_PER_TICK;
-            while (remaining > 0) {
-                if (stackCompactionState == null) {
-                    UUID ownerId = stackCompactionQueue.poll();
-                    if (ownerId == null) {
-                        stopStackCompaction();
-                        return;
-                    }
-                    stackCompactionState = new StackCompactionState(ownerId, getOrCreate(ownerId), getContainerVersion(ownerId));
-                }
-
-                StackCompactionState state = stackCompactionState;
-                if (getContainerVersion(state.ownerId) != state.version) {
-                    // A player/API mutation happened between ticks; restart from the current, safe view.
-                    stackCompactionState = new StackCompactionState(state.ownerId, getOrCreate(state.ownerId), getContainerVersion(state.ownerId));
-                    continue;
-                }
-
-                if (state.index >= state.items.size()) {
-                    if (state.changed) markDirty(state.ownerId);
-                    stackCompactionState = null;
-                    continue;
-                }
-
-                ItemStack item = state.items.get(state.index);
-                if (item == null || item.getType().isAir() || item.getAmount() <= 0) {
-                    state.items.remove(state.index);
-                    state.changed = true;
-                    remaining--;
-                    continue;
-                }
-
-                StorageItemKey key = new StorageItemKey(item);
-                ItemStack primary = state.primaryStacks.get(key);
-                if (primary == null) {
-                    state.primaryStacks.put(key, item);
-                    state.index++;
-                } else if (primary == item) {
-                    state.index++;
-                } else {
-                    int moved = Math.min(item.getAmount(), UNLIMITED_STACK_SIZE - primary.getAmount());
-                    if (moved > 0) {
-                        primary.setAmount(primary.getAmount() + moved);
-                        item.setAmount(item.getAmount() - moved);
-                        state.changed = true;
-                    }
-                    if (item.getAmount() <= 0) {
-                        state.items.remove(state.index);
-                    } else {
-                        state.index++;
-                    }
-                }
-                remaining--;
-            }
-        }
-    }
-
-    private synchronized void stopStackCompaction() {
-        stackCompactionQueue.clear();
-        stackCompactionState = null;
-        if (stackCompactionTask != null) {
-            stackCompactionTask.cancel();
-            stackCompactionTask = null;
-        }
-    }
-
-    private boolean awaitInitialLoad() {
-        try {
-            return initialLoadFinished.await(10L, TimeUnit.SECONDS);
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
     }
 
     private synchronized void closeStorage() {
@@ -554,14 +537,27 @@ public class ContainerManager {
         storage.close();
     }
 
-    private synchronized List<ItemStack> getOrCreate(UUID id) {
-        return cache.computeIfAbsent(id, ignored -> new ArrayList<>());
+    private boolean beginFlush(boolean allowShutdown) {
+        synchronized (flushStateLock) {
+            if (flushInProgress || storageClosed) return false;
+            if (!running) return false;
+            flushInProgress = true;
+            return true;
+        }
+    }
+
+    private void endFlush() {
+        synchronized (flushStateLock) {
+            flushInProgress = false;
+            flushStateLock.notifyAll();
+        }
     }
 
     private synchronized void markDirty(UUID id) {
         long version = ++mutationVersion;
         dirtyVersions.put(id, version);
         containerVersions.put(id, version);
+        ContainerDebugLogger.containerAction(id);
         queueOpenViewRefresh(id);
     }
 
@@ -583,69 +579,71 @@ public class ContainerManager {
         operation.active = false;
     }
 
-    private static final class StackCompactionState {
-        private final UUID ownerId;
-        private final List<ItemStack> items;
-        private final long version;
-        private final Map<StorageItemKey, ItemStack> primaryStacks = new HashMap<>();
-        private int index;
-        private boolean changed;
-
-        private StackCompactionState(UUID ownerId, List<ItemStack> items, long version) {
-            this.ownerId = ownerId;
-            this.items = items;
-            this.version = version;
+    /** Builds a detached snapshot on the server thread, then performs JDBC on the bounded persistence executor. */
+    private void startAutosave() {
+        if (persistenceSuspended || !beginFlush(false)) return;
+        DirtyCacheSnapshot snapshot = dirtyCacheSnapshot();
+        if (snapshot.containers().isEmpty()) {
+            endFlush();
+            return;
         }
-    }
-
-    /** Hashable form of the storage stack comparison, with the amount ignored. */
-    private static final class StorageItemKey {
-        private final ItemStack item;
-        private final int hashCode;
-
-        private StorageItemKey(ItemStack source) {
-            this.item = source.clone();
-            this.item.setAmount(1);
-            this.hashCode = 31 * item.getType().hashCode() + (item.hasItemMeta() ? item.getItemMeta().hashCode() : 0);
-        }
-
-        @Override
-        public boolean equals(Object other) {
-            return other instanceof StorageItemKey key && ItemUtils.isSameItemWithNBT(item, key.item);
-        }
-
-        @Override
-        public int hashCode() {
-            return hashCode;
-        }
-    }
-
-    private void flushDirtySync() {
-        synchronized (saveLock) {
-            Map<UUID, DirtyContainerSnapshot> snapshots = dirtySnapshots();
-            for (Map.Entry<UUID, DirtyContainerSnapshot> entry : snapshots.entrySet()) {
-                if (storage.save(entry.getKey(), entry.getValue().items())) {
-                    markSaved(entry.getKey(), entry.getValue().version());
+        plugin.getLogger().info("Autosave started: " + snapshot.containers().size() + " dirty container(s).");
+        markInFlight(snapshot);
+        try {
+            persistenceExecutor.execute(() -> {
+                try {
+                    persistSnapshot(snapshot, ContainerDebugLogger.SaveCause.AUTO_SAVE);
+                } finally {
+                    clearInFlight(snapshot);
+                    endFlush();
                 }
-            }
+            });
+        } catch (java.util.concurrent.RejectedExecutionException exception) {
+            clearInFlight(snapshot);
+            endFlush();
         }
     }
 
-    private synchronized Map<UUID, DirtyContainerSnapshot> dirtySnapshots() {
+    private boolean persistSnapshot(DirtyCacheSnapshot snapshot, ContainerDebugLogger.SaveCause cause) {
+        if (storage.saveAll(snapshot.itemLists())) {
+            for (Map.Entry<UUID, DirtyContainerSnapshot> entry : snapshot.containers().entrySet()) {
+                markSaved(entry.getKey(), entry.getValue().version());
+                deleteRecoveryJournal(entry.getKey());
+                ContainerDebugLogger.containerSaved(entry.getKey(), entry.getValue().items(), cause);
+            }
+            if (cause == ContainerDebugLogger.SaveCause.AUTO_SAVE) {
+                plugin.getLogger().info("Autosave completed: " + snapshot.containers().size()
+                        + " container(s), remaining dirty: " + dirtyCount() + ".");
+            } else if (cause == ContainerDebugLogger.SaveCause.SHUTDOWN) {
+                plugin.getLogger().info("Shutdown flush completed: " + snapshot.containers().size() + " container(s).");
+            }
+            return true;
+        }
+        for (UUID ownerId : snapshot.containers().keySet()) {
+            ContainerDebugLogger.containerSaveFailed(ownerId, cause);
+        }
+        plugin.getLogger().warning((cause == ContainerDebugLogger.SaveCause.SHUTDOWN ? "Shutdown flush" : "Autosave")
+                + " failed: " + snapshot.containers().size() + " container(s) remain dirty.");
+        return false;
+    }
+
+    /** Captures only changed containers before one atomic persistence transaction. */
+    private synchronized DirtyCacheSnapshot dirtyCacheSnapshot() {
         Map<UUID, DirtyContainerSnapshot> snapshots = new HashMap<>();
         for (Map.Entry<UUID, Long> entry : dirtyVersions.entrySet()) {
             snapshots.put(entry.getKey(), new DirtyContainerSnapshot(
-                    cloneItems(cache.getOrDefault(entry.getKey(), new ArrayList<>())),
+                    cloneItems(cache.getOrDefault(entry.getKey(), Collections.emptyList())),
                     entry.getValue()
             ));
         }
-        return snapshots;
+        return new DirtyCacheSnapshot(snapshots);
     }
 
     private synchronized void markSaved(UUID ownerId, long savedVersion) {
         Long currentVersion = dirtyVersions.get(ownerId);
         if (currentVersion != null && currentVersion == savedVersion) {
             dirtyVersions.remove(ownerId);
+            if (containerStates.get(ownerId) == ContainerState.UNLOADING) evict(ownerId);
         }
     }
 
@@ -675,6 +673,166 @@ public class ContainerManager {
         return copy;
     }
 
+    private record DirtyCacheSnapshot(Map<UUID, DirtyContainerSnapshot> containers) {
+        private Map<UUID, List<ItemStack>> itemLists() {
+            Map<UUID, List<ItemStack>> result = new HashMap<>();
+            for (Map.Entry<UUID, DirtyContainerSnapshot> entry : containers.entrySet()) {
+                result.put(entry.getKey(), entry.getValue().items());
+            }
+            return result;
+        }
+    }
+
+    private synchronized void markInFlight(DirtyCacheSnapshot snapshot) {
+        for (Map.Entry<UUID, DirtyContainerSnapshot> entry : snapshot.containers().entrySet()) {
+            inFlightVersions.put(entry.getKey(), entry.getValue().version());
+        }
+    }
+
+    private synchronized void clearInFlight(DirtyCacheSnapshot snapshot) {
+        for (Map.Entry<UUID, DirtyContainerSnapshot> entry : snapshot.containers().entrySet()) {
+            if (entry.getValue().version() == inFlightVersions.getOrDefault(entry.getKey(), -1L)) {
+                inFlightVersions.remove(entry.getKey());
+            }
+        }
+    }
+
+    private synchronized boolean canMutate(UUID ownerId) {
+        return running && ownerId != null && containerStates.get(ownerId) == ContainerState.READY
+                && Bukkit.getPlayer(ownerId) != null;
+    }
+
+    private synchronized List<ItemStack> readyItems(UUID ownerId) {
+        return ownerId != null && containerStates.get(ownerId) == ContainerState.READY ? cache.get(ownerId) : null;
+    }
+
+    private synchronized long nextSession(UUID ownerId) {
+        long session = ++sessionCounter;
+        sessions.put(ownerId, session);
+        return session;
+    }
+
+    private void loadPlayerAsync(UUID ownerId, long session) {
+        PlayerContainerLoadResult result;
+        try {
+            result = storage.load(ownerId);
+        } catch (RuntimeException exception) {
+            result = PlayerContainerLoadResult.failure(exception.getMessage());
+        }
+        List<ItemStack> recovered = null;
+        if (result.successful()) {
+            try {
+                recovered = recoveryJournal.read(ownerId);
+            } catch (java.io.IOException exception) {
+                result = PlayerContainerLoadResult.failure("Recovery journal could not be read: " + exception.getMessage());
+            }
+        }
+        PlayerContainerLoadResult finalResult = result;
+        List<ItemStack> finalRecovered = recovered;
+        scheduleMain(() -> publishLoadedPlayer(ownerId, session, finalResult, finalRecovered));
+    }
+
+    private synchronized void publishLoadedPlayer(UUID ownerId, long session, PlayerContainerLoadResult result, List<ItemStack> recovered) {
+        if (!running || sessions.getOrDefault(ownerId, -1L) != session || containerStates.get(ownerId) != ContainerState.LOADING
+                || Bukkit.getPlayer(ownerId) == null) return;
+        if (!result.successful()) {
+            containerStates.put(ownerId, ContainerState.LOAD_FAILED);
+            plugin.getLogger().severe("Failed to load container for " + ownerId + ": " + result.error());
+            return;
+        }
+        List<ItemStack> items = cloneItems(recovered == null ? result.items() : recovered);
+        cache.put(ownerId, items);
+        containerStates.put(ownerId, ContainerState.READY);
+        ContainerDebugLogger.containerLoaded(ownerId, items);
+        if (recovered != null) {
+            markDirty(ownerId);
+            submitSingleSave(ownerId, session, new DirtyContainerSnapshot(cloneItems(items), dirtyVersions.get(ownerId)));
+        }
+    }
+
+    private void submitSingleSave(UUID ownerId, long session, DirtyContainerSnapshot snapshot) {
+        synchronized (this) {
+            inFlightVersions.put(ownerId, snapshot.version());
+        }
+        try {
+        persistenceExecutor.execute(() -> {
+            boolean saved;
+            try {
+                saved = storage.save(ownerId, snapshot.items());
+            } catch (RuntimeException exception) {
+                saved = false;
+            }
+            boolean saveSucceeded = saved;
+            if (saveSucceeded) deleteRecoveryJournal(ownerId);
+            scheduleMain(() -> {
+                if (saveSucceeded) markSaved(ownerId, snapshot.version());
+                else ContainerDebugLogger.containerSaveFailed(ownerId, ContainerDebugLogger.SaveCause.AUTO_SAVE);
+                synchronized (ContainerManager.this) {
+                    if (inFlightVersions.getOrDefault(ownerId, -1L) == snapshot.version()) inFlightVersions.remove(ownerId);
+                }
+            });
+        });
+        } catch (java.util.concurrent.RejectedExecutionException exception) {
+            synchronized (this) {
+                if (inFlightVersions.getOrDefault(ownerId, -1L) == snapshot.version()) inFlightVersions.remove(ownerId);
+            }
+        }
+    }
+
+    private void deleteRecoveryJournal(UUID ownerId) {
+        // During plugin unload the journal is the authoritative snapshot. An older
+        // in-flight SQL save must never delete a journal written by onDisable().
+        if (!running) return;
+        try {
+            recoveryJournal.delete(ownerId);
+        } catch (java.io.IOException exception) {
+            plugin.getLogger().warning("Failed to remove container recovery journal for " + ownerId + ": " + exception.getMessage());
+        }
+    }
+
+    private void scheduleMain(Runnable task) {
+        if (!running) return;
+        try {
+            Bukkit.getScheduler().runTask(plugin, task);
+        } catch (IllegalPluginAccessException ignored) {
+        }
+    }
+
+    private synchronized void evict(UUID ownerId) {
+        cache.remove(ownerId);
+        dirtyVersions.remove(ownerId);
+        containerVersions.remove(ownerId);
+        inFlightVersions.remove(ownerId);
+        containerStates.remove(ownerId);
+        sessions.remove(ownerId);
+        bulkOperationOwners.remove(ownerId);
+        ContainerDebugLogger.clearPlayer(ownerId);
+    }
+
+    private ThreadFactory persistenceThreadFactory() {
+        return runnable -> {
+            Thread thread = new Thread(runnable, "VContainer-persistence");
+            thread.setDaemon(true);
+            return thread;
+        };
+    }
+
+    public synchronized ContainerState getContainerState(UUID ownerId) {
+        return containerStates.getOrDefault(ownerId, ContainerState.OFFLINE);
+    }
+
+    public synchronized boolean isContainerLoaded(UUID ownerId) {
+        return containerStates.get(ownerId) == ContainerState.READY;
+    }
+
+    public enum ContainerState {
+        OFFLINE,
+        LOADING,
+        READY,
+        UNLOADING,
+        LOAD_FAILED
+    }
+
     private record DirtyContainerSnapshot(List<ItemStack> items, long version) {
     }
 
@@ -684,7 +842,7 @@ public class ContainerManager {
         private final int requested;
         private final boolean targetHasMeta;
         private final org.bukkit.inventory.meta.ItemMeta targetMeta;
-        private final List<ItemStack> removedStacks = new ArrayList<>();
+        private final Map<ItemStack, Integer> removals = new IdentityHashMap<>();
         private int cursor;
         private int remaining;
         private int removed;

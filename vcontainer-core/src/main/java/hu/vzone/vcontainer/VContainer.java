@@ -19,6 +19,7 @@ import hu.vzone.vcontainer.utils.ConfigUpdater;
 import hu.vzone.vcontainer.utils.PlaceholderHook;
 import hu.vzone.vcontainer.utils.ServerVersionSupport;
 import hu.vzone.vcontainer.utils.AuditLogger;
+import hu.vzone.vcontainer.utils.ContainerDebugLogger;
 import hu.vzone.vcontainer.utils.SkinProvider;
 import hu.vzone.vcontainer.utils.UpdateChecker;
 import net.kyori.adventure.text.Component;
@@ -106,6 +107,7 @@ public final class VContainer extends JavaPlugin {
         Bukkit.getPluginManager().registerEvents(new ContainerListener(containerManager, storageBlockManager), this);
         Bukkit.getPluginManager().registerEvents(new ContainerSearchPrompt(), this);
         Bukkit.getPluginManager().registerEvents(new VortexMinionsLifecycleListener(this, vortexMinionsHookManager), this);
+        containerManager.loadOnlinePlayers();
         vortexMinionsHookManager.refreshHook();
         vortexMinionsHookManager.startHealthCheck();
         updateChecker.checkAsync();
@@ -126,6 +128,10 @@ public final class VContainer extends JavaPlugin {
 
     @Override
     public void onDisable() {
+        boolean serverStopping = getServer().isStopping();
+        if (!serverStopping) {
+            getLogger().warning("Runtime plugin unload detected. Writing dirty-container recovery journals before closing storage.");
+        }
         if (sellService != null) {
             sellService.shutdown();
         }
@@ -133,7 +139,7 @@ public final class VContainer extends JavaPlugin {
             containerManager.flushAllSync();
         }
         if (storageBlockManager != null) {
-            storageBlockManager.shutdown();
+            storageBlockManager.shutdownWithoutBlockingFlush();
         }
         if (vortexMinionsHookManager != null) {
             vortexMinionsHookManager.shutdown();
@@ -148,7 +154,8 @@ public final class VContainer extends JavaPlugin {
         ContainerGUI.shutdown();
         ContainerSearchPrompt.clearAll();
         SkinProvider.shutdown();
-        AuditLogger.shutdown();
+        AuditLogger.shutdown(true);
+        ContainerDebugLogger.shutdown(true);
         api = null;
         instance = null;
         getLogger().info("VContainer disabled.");

@@ -12,8 +12,8 @@
 # Runtime behavior:
 # - Data is loaded when the plugin starts.
 # - Changes are kept in memory first.
-# - Data is flushed automatically every 2 minutes.
-# - Data is flushed again when the plugin shuts down.
+# - Every 2 minutes all changed containers are saved in one transaction.
+# - Changed containers are saved again during a normal server shutdown.
 # ============================================================================
 
 # Internal config format version. Used for future automatic config upgrades.

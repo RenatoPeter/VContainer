@@ -38,6 +38,11 @@ public class VContainerAPIImpl implements VContainerAPI {
     }
 
     @Override
+    public boolean isContainerLoaded(UUID ownerId) {
+        return manager.isContainerLoaded(ownerId);
+    }
+
+    @Override
     public void addItem(Player player, ItemStack item) {
         manager.addItemToContainer(player, item);
     }

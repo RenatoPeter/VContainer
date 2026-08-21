@@ -48,9 +48,9 @@ public record StorageSettings(
         if (jdbcUrl != null && !jdbcUrl.isBlank()) return jdbcUrl;
         return switch (type) {
             case MYSQL -> "jdbc:mysql://" + hostname + ":" + port + "/" + database
-                    + "?useSSL=" + useSsl + "&allowPublicKeyRetrieval=true&serverTimezone=UTC";
+                    + "?useSSL=" + useSsl + "&allowPublicKeyRetrieval=true&serverTimezone=UTC&connectTimeout=5000&socketTimeout=10000";
             case MARIADB -> "jdbc:mariadb://" + hostname + ":" + port + "/" + database
-                    + "?useSsl=" + useSsl;
+                    + "?useSsl=" + useSsl + "&connectTimeout=5000&socketTimeout=10000";
             case H2 -> "jdbc:h2:" + new File(dataFolder, database).getAbsolutePath() + ";MODE=MySQL";
             case LOCAL -> "";
         };

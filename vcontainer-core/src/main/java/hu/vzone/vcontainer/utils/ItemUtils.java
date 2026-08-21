@@ -13,6 +13,7 @@ import java.util.Base64;
 import java.util.List;
 
 public class ItemUtils {
+    private static final int STORAGE_FORMAT_VERSION = -2;
     public static boolean isSimilarStack(ItemStack a, ItemStack b) {
         if (a == null || b == null) return false;
         if (a.getType() != b.getType()) return false;
@@ -70,9 +71,14 @@ public class ItemUtils {
     public static String itemsToBase64(List<ItemStack> items) throws IOException {
         try (ByteArrayOutputStream baos = new ByteArrayOutputStream();
              BukkitObjectOutputStream boos = new BukkitObjectOutputStream(baos)) {
+            boos.writeInt(STORAGE_FORMAT_VERSION);
             boos.writeInt(items.size());
             for (ItemStack item : items) {
-                boos.writeObject(item);
+                ItemStack data = item.clone();
+                int amount = data.getAmount();
+                data.setAmount(1);
+                boos.writeObject(data);
+                boos.writeInt(amount);
             }
             boos.flush();
             return Base64.getEncoder().encodeToString(baos.toByteArray());
@@ -83,10 +89,16 @@ public class ItemUtils {
         byte[] bytes = Base64.getDecoder().decode(data);
         try (ByteArrayInputStream bais = new ByteArrayInputStream(bytes);
              BukkitObjectInputStream bois = new BukkitObjectInputStream(bais)) {
-            int size = bois.readInt();
+            int header = bois.readInt();
+            boolean versioned = header == STORAGE_FORMAT_VERSION;
+            int size = versioned ? bois.readInt() : header;
             List<ItemStack> items = new ArrayList<>();
             for (int i = 0; i < size; i++) {
                 ItemStack item = (ItemStack) bois.readObject();
+                if (versioned) {
+                    int amount = bois.readInt();
+                    if (amount > 0) item.setAmount(amount);
+                }
                 items.add(item);
             }
             return items;

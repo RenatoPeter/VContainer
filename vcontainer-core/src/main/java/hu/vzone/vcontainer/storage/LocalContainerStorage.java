@@ -31,36 +31,17 @@ public class LocalContainerStorage implements ContainerStorage {
     }
 
     @Override
-    public Map<UUID, List<ItemStack>> loadAll() {
-        Map<UUID, List<ItemStack>> containers = new HashMap<>();
-        loadFromFolder(folder, containers, false);
-        if (!legacyFolder.equals(folder)) {
-            loadFromFolder(legacyFolder, containers, true);
+    public PlayerContainerLoadResult load(UUID ownerId) {
+        if (ownerId == null) return PlayerContainerLoadResult.failure("Missing owner UUID.");
+        File file = new File(folder, ownerId + ".json");
+        if (!file.exists() && !legacyFolder.equals(folder)) file = new File(legacyFolder, ownerId + ".json");
+        if (!file.exists()) return PlayerContainerLoadResult.success(new ArrayList<>());
+        List<ItemStack> items = load(file);
+        if (items == null) {
+            quarantine(file);
+            return PlayerContainerLoadResult.failure("Could not read local container file.");
         }
-        return containers;
-    }
-
-    private void loadFromFolder(File sourceFolder, Map<UUID, List<ItemStack>> containers, boolean migrate) {
-        File[] files = sourceFolder.listFiles((dir, name) -> name.endsWith(".json"));
-        if (files == null) return;
-
-        for (File file : files) {
-            String name = file.getName();
-            try {
-                UUID ownerId = UUID.fromString(name.substring(0, name.length() - ".json".length()));
-                if (containers.containsKey(ownerId)) continue;
-
-                List<ItemStack> items = load(file);
-                if (items == null) {
-                    quarantine(file);
-                    continue;
-                }
-                containers.put(ownerId, items);
-                if (migrate) save(ownerId, items);
-            } catch (IllegalArgumentException e) {
-                plugin.getLogger().warning("Skipping invalid container file: " + name);
-            }
-        }
+        return PlayerContainerLoadResult.success(items);
     }
 
     @Override

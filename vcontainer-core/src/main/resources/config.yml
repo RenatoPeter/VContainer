@@ -59,18 +59,6 @@ container-options:
     # Placeholder text used when a price is missing but the sell lore is still shown.
     unavailable-price-placeholder: "&cN/A"
 
-    # Large sales are split into small server-thread batches. Bukkit, Vault and
-    # shop plugin APIs are not thread-safe, so moving them to an async thread
-    # would risk data corruption and economy inconsistencies.
-    bulk-processing:
-      # Amount from which a sale is processed over multiple ticks.
-      threshold: 512
-      # Maximum stored item stacks removed per active sale each tick.
-      # Lower values take longer but further reduce TPS impact.
-      max-stacks-per-tick: 256
-      # Limits concurrent large sales to keep total per-tick work bounded.
-      max-active-sales: 16
-
   # Compact display merges equal stored items visually into one icon.
   # This does not remove the stored item data; it only changes how the GUI shows it.
   compact-display:
@@ -297,6 +285,17 @@ player-heads:
   # Leave empty to show Minecraft's default player head in that case.
   fallback-texture: ""
 
+# ============================================================================
+# Persistence Debugging
+# ============================================================================
+# Writes container load/save diagnostics to a separate file. Keep this disabled
+# in normal operation; enable it temporarily while investigating missing data.
+debug:
+  enabled: false
+  file: container-debug.log
+  batch-size: 256
+  max-queued-lines: 8192
+
 # Audit log for sensitive actions such as admin changes, item movement, and storage block changes.
 audit:
   # If true, VContainer writes audit entries to the configured file.
@@ -306,6 +305,8 @@ audit:
   hopper: false
   # Maximum number of queued audit lines written per async batch.
   batch-size: 256
+  # Hard cap for queued audit lines. Further lines are dropped instead of retaining memory indefinitely.
+  max-queued-lines: 8192
   # Audit log rotation threshold in bytes. Set to 0 to disable rotation.
   max-file-size-bytes: 10485760
   # File path relative to plugins/VContainer.

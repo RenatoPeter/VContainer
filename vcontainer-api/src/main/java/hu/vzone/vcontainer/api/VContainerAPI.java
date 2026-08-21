@@ -12,6 +12,9 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public interface VContainerAPI {
+    /** Containers are available only while their owner is online and their asynchronous load reached READY. */
+    boolean isContainerLoaded(UUID ownerId);
+
     void addItem(Player player, ItemStack item);
 
     void addItem(UUID ownerId, ItemStack item);
